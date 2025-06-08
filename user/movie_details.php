@@ -1,0 +1,221 @@
+<?php
+session_start();
+
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";
+$conn = new mysqli($host, $username, $password, $database);
+
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+$movie = null;
+$schedules = null;
+$errorMessage = '';
+
+if (isset($_GET['id']) && is_numeric($_GET['id'])) {
+    $movieId = $_GET['id'];
+
+    // Fetch movie details
+    $stmt = $conn->prepare("SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = ?");
+    $stmt->bind_param("i", $movieId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        $movie = $result->fetch_assoc();
+    } else {
+        $errorMessage = "Movie not found.";
+    }
+    $stmt->close();
+
+    // Fetch movie schedules
+    if ($movie) {
+        $stmt = $conn->prepare("
+            SELECT ms.scheduleID, ms.showDate, ms.showTime, ms.price,
+                   h.hallName, h.hallType, t.theaterName, t.theaterAddress, t.theaterCity
+            FROM movie_schedules ms
+            JOIN theater_halls h ON ms.hallID = h.hallID
+            JOIN theaters t ON h.theaterID = t.theaterID
+            WHERE ms.movieID = ? AND ms.scheduleStatus = 'active' AND ms.showDate >= CURDATE()
+            ORDER BY ms.showDate ASC, ms.showTime ASC
+        ");
+        $stmt->bind_param("i", $movieId);
+        $stmt->execute();
+        $schedules = $stmt->get_result();
+        $stmt->close();
+    }
+} else {
+    $errorMessage = "Invalid movie ID.";
+}
+
+$conn->close();
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?php echo $movie ? htmlspecialchars($movie['movieTitle']) . ' - Details' : 'Movie Details'; ?> - Showtime Select</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Custom CSS for 21stdev classic look -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e; /* Darker background */
+            color: #e0e0e0; /* Light text */
+            line-height: 1.6;
+        }
+        .header-bg {
+            background-color: #16213e; /* Slightly lighter dark for header */
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        .nav-link {
+            transition: all 0.3s ease;
+        }
+        .nav-link:hover {
+            color: #e94560; /* Accent color on hover */
+        }
+        .movie-detail-card {
+            background-color: #0f3460; /* Dark blue for main card */
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+        }
+        .movie-poster {
+            width: 100%;
+            height: auto;
+            max-height: 400px;
+            object-fit: contain; /* Keep aspect ratio and fit within bounds */
+            border-radius: 8px;
+            border: 3px solid #e94560; /* Accent border */
+        }
+        .schedule-card {
+            background-color: #1f4068; /* Slightly lighter blue for schedule cards */
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            transition: transform 0.2s ease;
+        }
+        .schedule-card:hover {
+            transform: translateY(-3px);
+        }
+        .btn-primary {
+            background-color: #e94560;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: background-color 0.3s ease;
+        }
+        .btn-primary:hover {
+            background-color: #b82e4a;
+        }
+        .footer-bg {
+            background-color: #16213e;
+        }
+        .logo-text {
+            color: #e94560; /* Accent color for logo */
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <!-- Header -->
+    <header class="header-bg shadow-lg py-4">
+        <div class="container mx-auto flex justify-between items-center px-4">
+            <a href="index.php" class="text-2xl font-bold logo-text">Showtime Select</a>
+            <nav>
+                <ul class="flex space-x-6">
+                    <li><a href="index.php" class="nav-link text-white hover:text-red-500">Home</a></li>
+                    <?php if (isset($_SESSION['user_id'])): ?>
+                        <li><a href="profile.php" class="nav-link text-white hover:text-red-500">Profile</a></li>
+                        <li><a href="logout.php" class="nav-link text-white hover:text-red-500">Logout</a></li>
+                    <?php else: ?>
+                        <li><a href="login.php" class="nav-link text-white hover:text-red-500">Login</a></li>
+                        <li><a href="register.php" class="nav-link text-white hover:text-red-500">Register</a></li>
+                    <?php endif; ?>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-8">
+        <?php if (!empty($errorMessage)): ?>
+            <div class="bg-red-600 text-white p-4 rounded-lg mb-6 text-center">
+                <?php echo $errorMessage; ?>
+            </div>
+            <div class="text-center">
+                <a href="index.php" class="btn-primary inline-block">Back to Movies</a>
+            </div>
+        <?php elseif ($movie): ?>
+            <div class="movie-detail-card p-8 flex flex-col md:flex-row items-center md:items-start gap-8">
+                <div class="md:w-1/3 flex-shrink-0">
+                    <img src="../<?php echo htmlspecialchars($movie['movieImg']); ?>" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-poster">
+                </div>
+                <div class="md:w-2/3">
+                    <h1 class="text-5xl font-bold text-white mb-4"><?php echo htmlspecialchars($movie['movieTitle']); ?></h1>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['movieGenre']); ?></p>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieDuration']); ?> minutes</p>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Release Date:</strong> <?php echo date('F j, Y', strtotime($movie['movieRelDate'])); ?></p>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Director:</strong> <?php echo htmlspecialchars($movie['movieDirector']); ?></p>
+                    <p class="text-lg text-gray-300 mb-4"><strong>Actors:</strong> <?php echo htmlspecialchars($movie['movieActors']); ?></p>
+                    <p class="text-lg text-gray-300 mb-4"><strong>Playing in:</strong> <?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></p>
+                </div>
+            </div>
+
+            <h2 class="text-4xl font-bold text-white text-center mt-12 mb-8">Available Showtimes</h2>
+
+            <?php if ($schedules && $schedules->num_rows > 0): ?>
+                <?php
+                // Group schedules by date
+                $groupedSchedules = [];
+                while ($schedule = $schedules->fetch_assoc()) {
+                    $date = $schedule['showDate'];
+                    if (!isset($groupedSchedules[$date])) {
+                        $groupedSchedules[$date] = [];
+                    }
+                    $groupedSchedules[$date][] = $schedule;
+                }
+                ?>
+                <?php foreach ($groupedSchedules as $date => $dailySchedules): ?>
+                    <div class="bg-gray-800 rounded-lg p-6 mb-6 shadow-md">
+                        <h3 class="text-2xl font-semibold text-white mb-4"><?php echo date('l, F j, Y', strtotime($date)); ?></h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <?php foreach ($dailySchedules as $schedule): ?>
+                                <div class="schedule-card p-5">
+                                    <p class="text-white text-xl font-medium mb-2"><i class="far fa-clock mr-2 text-e94560"></i> <?php echo date('h:i A', strtotime($schedule['showTime'])); ?></p>
+                                    <p class="text-gray-300 text-md mb-1"><i class="fas fa-building mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theaterName']); ?></p>
+                                    <p class="text-gray-300 text-md mb-1"><i class="fas fa-couch mr-2 text-e94560"></i> Hall: <?php echo htmlspecialchars($schedule['hallName']); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</p>
+                                    <p class="text-gray-300 text-md mb-4"><i class="fas fa-map-marker-alt mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theaterAddress']) . ', ' . htmlspecialchars($schedule['theaterCity']); ?></p>
+                                    <p class="text-white text-2xl font-bold mb-4">₹<?php echo number_format($schedule['price'], 2); ?></p>
+                                    <?php if (isset($_SESSION['user_id'])): ?>
+                                        <a href="booking.php?schedule_id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn-primary block text-center">Book Now</a>
+                                    <?php else: ?>
+                                        <a href="login.php?message=Please login to book tickets" class="btn-primary block text-center">Login to Book</a>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <p class="text-center text-xl text-gray-400">No upcoming showtimes available for this movie.</p>
+            <?php endif; ?>
+        <?php endif; ?>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer-bg text-gray-400 py-8 mt-12">
+        <div class="container mx-auto text-center px-4">
+            <p>&copy; <?php echo date('Y'); ?> Showtime Select. All rights reserved.</p>
+            <p class="text-sm">Designed with <i class="fas fa-heart text-red-500"></i> by 21stdev</p>
+        </div>
+    </footer>
+</body>
+</html>

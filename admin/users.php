@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible only by Super Admin (roleID 1)
+if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -20,55 +20,92 @@ if ($conn->connect_error) {
 
 // Pagination
 $limit = 10;
-$page = isset($_GET['page']) ? $_GET['page'] : 1;
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $start = ($page - 1) * $limit;
 
 // Search functionality
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
+$params = [];
+$types = '';
+
 if (!empty($search)) {
-    $searchCondition = " WHERE username LIKE '%$search%' OR name LIKE '%$search%'";
+    $searchParam = "%" . $search . "%";
+    $searchCondition = " WHERE username LIKE ? OR name LIKE ? OR phone LIKE ?"; // Added phone to search
+    $params = [$searchParam, $searchParam, $searchParam];
+    $types = "sss";
 }
 
 // Get total users count
 $totalQuery = "SELECT COUNT(*) as total FROM users $searchCondition";
-$totalResult = $conn->query($totalQuery);
+$stmtCount = $conn->prepare($totalQuery);
+if (!empty($searchCondition)) {
+    $stmtCount->bind_param($types, ...$params);
+}
+$stmtCount->execute();
+$totalResult = $stmtCount->get_result();
 $totalRow = $totalResult->fetch_assoc();
 $total = $totalRow['total'];
 $pages = ceil($total / $limit);
+$stmtCount->close();
 
 // Get users with pagination
 $usersQuery = "
-    SELECT * FROM users
+    SELECT id, username, name, phone FROM users
     $searchCondition
     ORDER BY id DESC
-    LIMIT $start, $limit
+    LIMIT ?, ?
 ";
-$users = $conn->query($usersQuery);
+$stmtUsers = $conn->prepare($usersQuery);
+// Rebind parameters for the main query
+$query_params = $params; // Copy search parameters
+$query_types = $types; // Copy search types
+
+$query_params[] = $start;
+$query_params[] = $limit;
+$query_types .= "ii";
+
+if (!empty($searchCondition)) {
+    $stmtUsers->bind_param($query_types, ...$query_params);
+} else {
+    $stmtUsers->bind_param("ii", $start, $limit);
+}
+$stmtUsers->execute();
+$users = $stmtUsers->get_result();
+$stmtUsers->close();
 
 // Process form submission for adding a new user
 $message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $newName = $_POST['name'];
-    $newUsername = $_POST['username'];
-    $newPassword = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    
+    $newUsername = $_POST['username']; // This is treated as email
+    $newPassword = $_POST['password']; // Plain text as per your users table structure
+    $newPhone = $_POST['phone'] ?? ''; // New phone column
+
     // Check if username already exists
-    $checkQuery = "SELECT * FROM users WHERE username = '$newUsername'";
-    $checkResult = $conn->query($checkQuery);
+    $checkQuery = $conn->prepare("SELECT id FROM users WHERE username = ? LIMIT 1");
+    $checkQuery->bind_param("s", $newUsername);
+    $checkQuery->execute();
+    $checkResult = $checkQuery->get_result();
+    $checkQuery->close();
     
     if ($checkResult->num_rows > 0) {
-        $message = '<div class="alert alert-danger">Username already exists!</div>';
+        $message = '<div class="alert alert-danger">Username (Email) already exists!</div>';
     } else {
-        $insertQuery = "INSERT INTO users (username, name, password) VALUES ('$newUsername', '$newName', '$newPassword')";
-        if ($conn->query($insertQuery) === TRUE) {
+        // Insert new user - Assuming plain text password for consistency with sample data
+        // In a real application, ALWAYS hash passwords using password_hash()
+        $insertQuery = $conn->prepare("INSERT INTO users (username, name, password, phone) VALUES (?, ?, ?, ?)");
+        $insertQuery->bind_param("ssss", $newUsername, $newName, $newPassword, $newPhone);
+
+        if ($insertQuery->execute()) {
             $message = '<div class="alert alert-success">User added successfully!</div>';
             // Redirect to refresh the page and show updated user list
-            header("Location: users.php");
+            header("Location: users.php?success=1");
             exit();
         } else {
             $message = '<div class="alert alert-danger">Error: ' . $conn->error . '</div>';
         }
+        $insertQuery->close();
     }
 }
 
@@ -286,6 +323,12 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
@@ -300,11 +343,13 @@ $conn->close();
                     <h1>Users Management</h1>
                     <div class="admin-user-info">
                         <img src="https://via.placeholder.com/40" alt="Admin">
-                        <span>Welcome, <?php echo $_SESSION['admin_name']; ?></span>
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
-                <?php echo $message; ?>
+                <?php if (isset($message)): // Display messages from add user ?>
+                    <?php echo $message; ?>
+                <?php endif; ?>
 
                 <div class="table-container">
                     <div class="d-flex justify-content-between mb-4">
@@ -331,7 +376,8 @@ $conn->close();
                                 <tr>
                                     <th>ID</th>
                                     <th>Name</th>
-                                    <th>Username</th>
+                                    <th>Username (Email)</th>
+                                    <th>Phone</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -339,14 +385,17 @@ $conn->close();
                                 <?php if ($users->num_rows > 0): ?>
                                     <?php while ($user = $users->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $user['id']; ?></td>
-                                            <td><?php echo $user['name']; ?></td>
-                                            <td><?php echo $user['username']; ?></td>
+                                            <td><?php echo htmlspecialchars($user['id']); ?></td>
+                                            <td><?php echo htmlspecialchars($user['name']); ?></td>
+                                            <td><?php echo htmlspecialchars($user['username']); ?></td>
+                                            <td><?php echo htmlspecialchars($user['phone'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <a href="edit_user.php?id=<?php echo $user['id']; ?>" class="btn btn-sm btn-primary">
+                                                <!-- Edit/Delete links for users -->
+                                                <!-- You'd need edit_user.php and delete_user.php -->
+                                                <a href="edit_user.php?id=<?php echo htmlspecialchars($user['id']); ?>" class="btn btn-sm btn-primary">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="delete_user.php?id=<?php echo $user['id']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this user?')">
+                                                <a href="delete_user.php?id=<?php echo htmlspecialchars($user['id']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this user?')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
@@ -354,7 +403,7 @@ $conn->close();
                                     <?php endwhile; ?>
                                 <?php else: ?>
                                     <tr>
-                                        <td colspan="4" class="text-center">No users found</td>
+                                        <td colspan="5" class="text-center">No users found</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
@@ -419,6 +468,10 @@ $conn->close();
                         <div class="form-group">
                             <label for="password">Password</label>
                             <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">Phone Number</label>
+                            <input type="text" class="form-control" id="phone" name="phone">
                         </div>
                     </div>
                     <div class="modal-footer">

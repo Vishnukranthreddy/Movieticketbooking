@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible only by Super Admin (roleID 1)
+if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -26,33 +26,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = $_POST['name'];
         $email = $_POST['email'];
         
-        $updateQuery = "UPDATE users SET name = '$name', username = '$email' WHERE id = $admin_id";
-        if ($conn->query($updateQuery) === TRUE) {
+        // Use prepared statements for security
+        $updateQuery = $conn->prepare("UPDATE admin_users SET fullName = ?, username = ? WHERE adminID = ?");
+        $updateQuery->bind_param("ssi", $name, $email, $admin_id);
+
+        if ($updateQuery->execute()) {
             $_SESSION['admin_name'] = $name;
             $message = '<div class="alert alert-success">Profile updated successfully!</div>';
         } else {
             $message = '<div class="alert alert-danger">Error updating profile: ' . $conn->error . '</div>';
         }
+        $updateQuery->close(); // Close the statement
     } elseif (isset($_POST['change_password'])) {
         $admin_id = $_SESSION['admin_id'];
         $current_password = $_POST['current_password'];
         $new_password = $_POST['new_password'];
         $confirm_password = $_POST['confirm_password'];
         
-        // Verify current password
-        $passwordQuery = "SELECT password FROM users WHERE id = $admin_id";
-        $result = $conn->query($passwordQuery);
-        $user = $result->fetch_assoc();
-        
-        if (password_verify($current_password, $user['password'])) {
+        // Verify current password - Use prepared statement
+        $passwordQuery = $conn->prepare("SELECT password FROM admin_users WHERE adminID = ?");
+        $passwordQuery->bind_param("i", $admin_id);
+        $passwordQuery->execute();
+        $result = $passwordQuery->get_result();
+        $admin = $result->fetch_assoc();
+        $passwordQuery->close(); // Close the statement
+
+        // IMPORTANT: Assuming passwords are HASHED in `admin_users` table as per initial SQL script.
+        // If your `admin_users` passwords are plain text, change `password_verify` to direct comparison.
+        if (password_verify($current_password, $admin['password'])) {
             if ($new_password === $confirm_password) {
                 $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                $updateQuery = "UPDATE users SET password = '$hashed_password' WHERE id = $admin_id";
-                if ($conn->query($updateQuery) === TRUE) {
+                $updateQuery = $conn->prepare("UPDATE admin_users SET password = ? WHERE adminID = ?");
+                $updateQuery->bind_param("si", $hashed_password, $admin_id);
+                if ($updateQuery->execute()) {
                     $message = '<div class="alert alert-success">Password changed successfully!</div>';
                 } else {
                     $message = '<div class="alert alert-danger">Error changing password: ' . $conn->error . '</div>';
                 }
+                $updateQuery->close(); // Close the statement
             } else {
                 $message = '<div class="alert alert-danger">New passwords do not match!</div>';
             }
@@ -60,17 +71,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = '<div class="alert alert-danger">Current password is incorrect!</div>';
         }
     } elseif (isset($_POST['update_site_settings'])) {
-        // This would update site settings in a real application
-        // For now, we'll just show a success message
-        $message = '<div class="alert alert-success">Site settings updated successfully!</div>';
+        // This section is for hypothetical site settings.
+        // No specific table for site settings was provided, so this is just a placeholder.
+        $message = '<div class="alert alert-success">Site settings updated successfully! (Functionality not fully implemented without a settings table)</div>';
     }
 }
 
 // Get admin profile information
 $admin_id = $_SESSION['admin_id'];
-$profileQuery = "SELECT * FROM users WHERE id = $admin_id";
-$profileResult = $conn->query($profileQuery);
+$profileQuery = $conn->prepare("SELECT adminID, username, fullName FROM admin_users WHERE adminID = ?");
+$profileQuery->bind_param("i", $admin_id);
+$profileQuery->execute();
+$profileResult = $profileQuery->get_result();
 $profile = $profileResult->fetch_assoc();
+$profileQuery->close(); // Close the statement
 
 $conn->close();
 ?>
@@ -290,7 +304,7 @@ $conn->close();
                     <h1>Settings</h1>
                     <div class="admin-user-info">
                         <img src="https://via.placeholder.com/40" alt="Admin">
-                        <span>Welcome, <?php echo $_SESSION['admin_name']; ?></span>
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
@@ -313,11 +327,11 @@ $conn->close();
                             <form action="" method="POST">
                                 <div class="form-group">
                                     <label for="name">Name</label>
-                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($profile['name']); ?>" required>
+                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($profile['fullName'] ?? ''); ?>" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="email">Email</label>
-                                    <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($profile['username']); ?>" required>
+                                    <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($profile['username'] ?? ''); ?>" required>
                                 </div>
                                 <button type="submit" name="update_profile" class="btn btn-primary">Update Profile</button>
                             </form>

@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -19,6 +19,8 @@ if ($conn->connect_error) {
 }
 
 // Handle theater deletion
+$successMessage = '';
+$errorMessage = '';
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $theaterId = $_GET['delete'];
     
@@ -29,21 +31,31 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $result = $checkQuery->get_result();
     
     if ($result->num_rows > 0) {
-        // Delete the theater
-        $deleteQuery = $conn->prepare("DELETE FROM theaters WHERE theaterID = ?");
-        $deleteQuery->bind_param("i", $theaterId);
-        
-        if ($deleteQuery->execute()) {
-            $successMessage = "Theater deleted successfully!";
+        // IMPORTANT: Check for foreign key dependencies before deleting!
+        // Check if theater is used in theater_halls, which could then be linked to schedules/bookings
+        $checkHallsQuery = $conn->prepare("SELECT COUNT(*) as count FROM theater_halls WHERE theaterID = ?");
+        $checkHallsQuery->bind_param("i", $theaterId);
+        $checkHallsQuery->execute();
+        $hallsCount = $checkHallsQuery->get_result()->fetch_assoc()['count'];
+        $checkHallsQuery->close();
+
+        if ($hallsCount > 0) {
+            $errorMessage = "Cannot delete theater. It has " . $hallsCount . " hall(s) associated. Delete halls first.";
         } else {
-            $errorMessage = "Error deleting theater: " . $conn->error;
+            // Delete the theater
+            $deleteQuery = $conn->prepare("DELETE FROM theaters WHERE theaterID = ?");
+            $deleteQuery->bind_param("i", $theaterId);
+            
+            if ($deleteQuery->execute()) {
+                $successMessage = "Theater deleted successfully!";
+            } else {
+                $errorMessage = "Error deleting theater: " . $conn->error;
+            }
+            $deleteQuery->close();
         }
-        
-        $deleteQuery->close();
     } else {
         $errorMessage = "Theater not found!";
     }
-    
     $checkQuery->close();
 }
 
@@ -59,8 +71,8 @@ $params = [];
 $types = '';
 
 if (!empty($search)) {
+    $searchParam = "%" . $search . "%";
     $searchCondition = "WHERE theaterName LIKE ? OR theaterCity LIKE ? OR theaterState LIKE ?";
-    $searchParam = "%$search%";
     $params = [$searchParam, $searchParam, $searchParam];
     $types = "sss";
 }
@@ -68,15 +80,13 @@ if (!empty($search)) {
 // Count total records for pagination
 $countQuery = "SELECT COUNT(*) as total FROM theaters $searchCondition";
 
+$stmtCount = $conn->prepare($countQuery);
 if (!empty($searchCondition)) {
-    $stmt = $conn->prepare($countQuery);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $totalRecords = $stmt->get_result()->fetch_assoc()['total'];
-    $stmt->close();
-} else {
-    $totalRecords = $conn->query($countQuery)->fetch_assoc()['total'];
+    $stmtCount->bind_param($types, ...$params);
 }
+$stmtCount->execute();
+$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
+$stmtCount->close();
 
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
@@ -85,11 +95,16 @@ $query = "SELECT * FROM theaters $searchCondition ORDER BY theaterID DESC LIMIT 
 
 $stmt = $conn->prepare($query);
 
+// Rebind parameters for the main query
+$query_params = $params; // Copy search parameters
+$query_types = $types; // Copy search types
+
+$query_params[] = $offset;
+$query_params[] = $recordsPerPage;
+$query_types .= "ii";
+
 if (!empty($searchCondition)) {
-    $params[] = $offset;
-    $params[] = $recordsPerPage;
-    $types .= "ii";
-    $stmt->bind_param($types, ...$params);
+    $stmt->bind_param($query_types, ...$query_params);
 } else {
     $stmt->bind_param("ii", $offset, $recordsPerPage);
 }
@@ -273,6 +288,12 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
@@ -345,25 +366,25 @@ $conn->close();
                                 <?php if ($theaters->num_rows > 0): ?>
                                     <?php while ($theater = $theaters->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $theater['theaterID']; ?></td>
-                                            <td><?php echo $theater['theaterName']; ?></td>
-                                            <td><?php echo $theater['theaterCity']; ?></td>
-                                            <td><?php echo $theater['theaterState']; ?></td>
-                                            <td><?php echo $theater['theaterPhone']; ?></td>
-                                            <td><?php echo $theater['theaterEmail']; ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterID']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterName']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterCity']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterState']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterPhone']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterEmail']); ?></td>
                                             <td>
                                                 <span class="status-badge <?php echo $theater['theaterStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst($theater['theaterStatus']); ?>
+                                                    <?php echo ucfirst(htmlspecialchars($theater['theaterStatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_theater.php?id=<?php echo $theater['theaterID']; ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_theater.php?id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="theaters.php?delete=<?php echo $theater['theaterID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this theater?')">
+                                                <a href="theaters.php?delete=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this theater? This will also delete associated halls, schedules, and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
-                                                <a href="theater_halls.php?theater_id=<?php echo $theater['theaterID']; ?>" class="btn btn-sm btn-info">
+                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn btn-sm btn-info" title="Manage Halls">
                                                     <i class="fas fa-door-open"></i>
                                                 </a>
                                             </td>

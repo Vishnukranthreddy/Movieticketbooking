@@ -3,13 +3,13 @@ session_start();
 
 // Check if user is logged in
 if (!isset($_SESSION['admin_id'])) {
-    header("Location: index.php");
+    header("Location: ../index.php"); // Redirect to main admin login
     exit();
 }
 
-// Redirect Theater Managers to their specific dashboard
-if (isset($_SESSION['admin_role']) && $_SESSION['admin_role'] == 2) {
-    header("Location: theater_manager/dashboard.php");
+// Ensure user has Theater Manager role (roleID = 2)
+if ($_SESSION['admin_role'] != 2) {
+    header("Location: ../dashboard.php"); // Redirect to main admin dashboard or access denied page
     exit();
 }
 
@@ -24,25 +24,26 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Get counts for dashboard
-$movieCount = $conn->query("SELECT COUNT(*) as count FROM movietable")->fetch_assoc()['count'];
-$bookingCount = $conn->query("SELECT COUNT(*) as count FROM bookingtable")->fetch_assoc()['count'];
-$userCount = $conn->query("SELECT COUNT(*) as count FROM users")->fetch_assoc()['count'];
+// Get counts for dashboard relevant to Theater Manager
 $theaterCount = $conn->query("SELECT COUNT(*) as count FROM theaters")->fetch_assoc()['count'];
+$activeSchedulesCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules WHERE scheduleStatus = 'active'")->fetch_assoc()['count'];
+$upcomingMoviesCount = $conn->query("SELECT COUNT(*) as count FROM movietable WHERE movieRelDate >= CURDATE()")->fetch_assoc()['count'];
 
-// Get recent bookings
-$recentBookings = $conn->query("
-    SELECT b.*, m.movieTitle, u.name as userName
-    FROM bookingtable b
-    LEFT JOIN movietable m ON b.movieID = m.movieID
-    LEFT JOIN users u ON b.bookingEmail = u.username -- Assuming bookingEmail maps to user username (email)
-    ORDER BY bookingID DESC LIMIT 5
+// Get recent schedules
+$recentSchedules = $conn->query("
+    SELECT ms.*, m.movieTitle, h.hallName, t.theaterName
+    FROM movie_schedules ms
+    JOIN movietable m ON ms.movieID = m.movieID
+    JOIN theater_halls h ON ms.hallID = h.hallID
+    JOIN theaters t ON h.theaterID = t.theaterID
+    WHERE ms.showDate >= CURDATE()
+    ORDER BY ms.showDate ASC, ms.showTime ASC LIMIT 5
 ");
 
-// Get recent movies
-$recentMovies = $conn->query("
-    SELECT * FROM movietable
-    ORDER BY movieID DESC LIMIT 5
+// Get recent theaters added
+$recentTheaters = $conn->query("
+    SELECT * FROM theaters
+    ORDER BY theaterID DESC LIMIT 5
 ");
 
 $conn->close();
@@ -53,10 +54,10 @@ $conn->close();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Showtime Select Admin</title>
+    <title>Theater Manager Dashboard - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Path adjusted for theater_manager folder -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -144,10 +145,9 @@ $conn->close();
             font-weight: bold;
             color: #007bff;
         }
-        .summary-card.movies .count { color: #28a745; }
-        .summary-card.bookings .count { color: #ffc107; }
-        .summary-card.users .count { color: #17a2b8; }
         .summary-card.theaters .count { color: #6f42c1; }
+        .summary-card.schedules .count { color: #fd7e14; }
+        .summary-card.movies .count { color: #28a745; }
 
         .dashboard-section {
             background-color: #fff;
@@ -161,12 +161,6 @@ $conn->close();
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
-        }
-        .movie-image {
-            width: 50px;
-            height: 70px;
-            object-fit: cover;
-            border-radius: 3px;
         }
         .table-responsive {
             margin-top: 15px;
@@ -222,10 +216,10 @@ $conn->close();
 </head>
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
+        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Theater Manager</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="logout.php">Sign out</a>
+                <a class="btn btn-signout" href="../logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -242,21 +236,9 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
-                            </a>
-                        </li>
-                        <li class="nav-item">
                             <a class="nav-link" href="theaters.php">
                                 <i class="fas fa-building"></i>
                                 Theaters
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
-                                <i class="fas fa-map-marker-alt"></i>
-                                Locations
                             </a>
                         </li>
                         <li class="nav-item">
@@ -265,136 +247,67 @@ $conn->close();
                                 Schedules
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="bookings.php">
-                                <i class="fas fa-ticket-alt"></i>
-                                Bookings
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="users.php">
-                                <i class="fas fa-users"></i>
-                                Users
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="reports.php">
-                                <i class="fas fa-chart-bar"></i>
-                                Reports
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
-                                <i class="fas fa-cog"></i>
-                                Settings
-                            </a>
-                        </li>
                     </ul>
                 </div>
             </nav>
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Dashboard</h1>
+                    <h1>Theater Manager Dashboard</h1>
                     <div class="admin-user-info">
                         <img src="https://via.placeholder.com/40" alt="Admin Avatar">
-                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Theater Manager'); ?></span>
                     </div>
                 </div>
 
                 <div class="row">
-                    <div class="col-md-3">
-                        <div class="summary-card movies">
-                            <h4>Total Movies</h4>
-                            <div class="count"><?php echo $movieCount; ?></div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="summary-card bookings">
-                            <h4>Total Bookings</h4>
-                            <div class="count"><?php echo $bookingCount; ?></div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="summary-card users">
-                            <h4>Total Users</h4>
-                            <div class="count"><?php echo $userCount; ?></div>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="summary-card theaters">
-                            <h4>Total Theaters</h4>
+                            <h4>Total Theaters Managed</h4>
                             <div class="count"><?php echo $theaterCount; ?></div>
                         </div>
                     </div>
+                    <div class="col-md-4">
+                        <div class="summary-card schedules">
+                            <h4>Active Schedules</h4>
+                            <div class="count"><?php echo $activeSchedulesCount; ?></div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="summary-card movies">
+                            <h4>Upcoming Movies</h4>
+                            <div class="count"><?php echo $upcomingMoviesCount; ?></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="dashboard-section">
-                    <h3>Recent Bookings</h3>
+                    <h3>Recent Schedules</h3>
                     <div class="table-responsive">
                         <table class="table table-striped">
                             <thead>
                                 <tr>
-                                    <th>ID</th>
+                                    <th>Schedule ID</th>
                                     <th>Movie</th>
-                                    <th>Customer</th>
+                                    <th>Theater</th>
+                                    <th>Hall</th>
                                     <th>Date</th>
                                     <th>Time</th>
-                                    <th>Amount</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if ($recentBookings->num_rows > 0): ?>
-                                    <?php while ($booking = $recentBookings->fetch_assoc()): ?>
+                                <?php if ($recentSchedules->num_rows > 0): ?>
+                                    <?php while ($schedule = $recentSchedules->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $booking['bookingID']; ?></td>
-                                            <td><?php echo $booking['movieTitle'] ?? 'N/A'; ?></td>
-                                            <td><?php echo $booking['bookingFName'] . ' ' . $booking['bookingLName']; ?></td>
-                                            <td><?php echo $booking['bookingDate']; ?></td>
-                                            <td><?php echo $booking['bookingTime']; ?></td>
-                                            <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
+                                            <td><?php echo $schedule['scheduleID']; ?></td>
+                                            <td><?php echo $schedule['movieTitle']; ?></td>
+                                            <td><?php echo $schedule['theaterName']; ?></td>
+                                            <td><?php echo $schedule['hallName']; ?></td>
+                                            <td><?php echo date('Y-m-d', strtotime($schedule['showDate'])); ?></td>
+                                            <td><?php echo date('h:i A', strtotime($schedule['showTime'])); ?></td>
                                             <td>
-                                                <a href="view_booking.php?id=<?php echo $booking['bookingID']; ?>" class="btn btn-sm btn-info">
-                                                    <i class="fas fa-eye"></i> View
-                                                </a>
-                                            </td>
-                                        </tr>
-                                    <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="7" class="text-center">No recent bookings</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                    <a href="bookings.php" class="btn btn-primary btn-sm mt-3">View All Bookings</a>
-                </div>
-
-                <div class="dashboard-section">
-                    <h3>Recent Movies Added</h3>
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Title</th>
-                                    <th>Genre</th>
-                                    <th>Duration</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($recentMovies->num_rows > 0): ?>
-                                    <?php while ($movie = $recentMovies->fetch_assoc()): ?>
-                                        <tr>
-                                            <td><?php echo $movie['movieID']; ?></td>
-                                            <td><?php echo $movie['movieTitle']; ?></td>
-                                            <td><?php echo $movie['movieGenre']; ?></td>
-                                            <td><?php echo $movie['movieDuration']; ?> min</td>
-                                            <td>
-                                                <a href="edit_movie.php?id=<?php echo $movie['movieID']; ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_schedule.php?id=<?php echo $schedule['scheduleID']; ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
                                             </td>
@@ -402,12 +315,51 @@ $conn->close();
                                     <?php endwhile; ?>
                                 <?php else: ?>
                                     <tr>
-                                        <td colspan="5" class="text-center">No movies found</td>
+                                        <td colspan="7" class="text-center">No recent schedules</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
-                        <a href="movies.php" class="btn btn-primary btn-sm mt-3">View All Movies</a>
+                    </div>
+                    <a href="schedules.php" class="btn btn-primary btn-sm mt-3">View All Schedules</a>
+                </div>
+
+                <div class="dashboard-section">
+                    <h3>Recent Theaters Added</h3>
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>City</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if ($recentTheaters->num_rows > 0): ?>
+                                    <?php while ($theater = $recentTheaters->fetch_assoc()): ?>
+                                        <tr>
+                                            <td><?php echo $theater['theaterID']; ?></td>
+                                            <td><?php echo $theater['theaterName']; ?></td>
+                                            <td><?php echo $theater['theaterCity']; ?></td>
+                                            <td><span class="badge badge-<?php echo $theater['theaterStatus'] == 'active' ? 'success' : 'danger'; ?>"><?php echo ucfirst($theater['theaterStatus']); ?></span></td>
+                                            <td>
+                                                <a href="edit_theater.php?id=<?php echo $theater['theaterID']; ?>" class="btn btn-sm btn-warning">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="5" class="text-center">No recent theaters</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                        <a href="theaters.php" class="btn btn-primary btn-sm mt-3">View All Theaters</a>
                     </div>
                 </div>
             </main>

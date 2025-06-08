@@ -1,17 +1,11 @@
 <?php
 session_start();
 
-// Check if already logged in
-if (isset($_SESSION['admin_id'])) {
-    header("Location: dashboard.php");
-    exit();
-}
-
 // Database connection
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensure consistent database
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -22,39 +16,48 @@ $error = "";
 
 // Process login form
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    $username = $_POST["username"];
-    $password = $_POST["password"];
+    $input_username = $_POST["username"];
+    $input_password = $_POST["password"];
 
     // Use prepared statements to prevent SQL injection
-    $query = $conn->prepare("SELECT * FROM admin_users WHERE username = ? AND status = 'active' LIMIT 1");
-    $query->bind_param("s", $username);
+    $query = $conn->prepare("SELECT adminID, username, password, fullName, roleID FROM admin_users WHERE username = ? AND status = 'active' LIMIT 1");
+    $query->bind_param("s", $input_username);
     $query->execute();
     $result = $query->get_result();
 
     if ($result->num_rows > 0) {
         $admin = $result->fetch_assoc();
         // Verify the password
-        if (password_verify($password, $admin['password'])) {
+        if (password_verify($input_password, $admin['password'])) { // Using password_verify as admin_users passwords should be hashed
             // Set session variables
             $_SESSION['admin_id'] = $admin['adminID'];
             $_SESSION['admin_username'] = $admin['username'];
             $_SESSION['admin_name'] = $admin['fullName'];
-            $_SESSION['admin_role'] = $admin['roleID'];
-            
+            $_SESSION['admin_role'] = $admin['roleID']; // Store the roleID
+
             // Update last login time
             $updateQuery = $conn->prepare("UPDATE admin_users SET lastLogin = NOW() WHERE adminID = ?");
             $updateQuery->bind_param("i", $admin['adminID']);
             $updateQuery->execute();
-            
-            // Redirect to dashboard
+            $updateQuery->close();
+
+            // Redirect based on role
             $_SESSION['just_logged_in'] = true;
-            header("Location: dashboard.php");
+            if ($_SESSION['admin_role'] == 1) { // Super Admin
+                header("Location: dashboard.php");
+            } elseif ($_SESSION['admin_role'] == 2) { // Theater Manager
+                header("Location: theater_manager/dashboard.php"); // Redirect to specific dashboard
+            } else {
+                // Default redirect or error for other roles
+                $error = "Unauthorized role.";
+                session_destroy(); // Destroy session if role is not handled
+            }
             exit();
         } else {
-            $error = "Invalid username or password";
+            $error = "Invalid username or password.";
         }
     } else {
-        $error = "Invalid username or password";
+        $error = "Invalid username or password.";
     }
     $query->close();
 }
@@ -91,6 +94,9 @@ $conn->close();
         .login-logo h1 {
             color: #e83e8c;
             font-weight: bold;
+        }
+        .login-logo p {
+            color: #6c757d;
         }
         .login-form .form-control {
             height: 45px;

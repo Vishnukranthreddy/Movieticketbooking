@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -19,6 +19,8 @@ if ($conn->connect_error) {
 }
 
 // Handle location deletion
+$successMessage = '';
+$errorMessage = '';
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $locationId = $_GET['delete'];
     
@@ -34,9 +36,10 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
         $checkMoviesQuery->bind_param("i", $locationId);
         $checkMoviesQuery->execute();
         $moviesCount = $checkMoviesQuery->get_result()->fetch_assoc()['count'];
+        $checkMoviesQuery->close();
         
         if ($moviesCount > 0) {
-            $errorMessage = "Cannot delete location. It is associated with $moviesCount movie(s).";
+            $errorMessage = "Cannot delete location. It is associated with " . $moviesCount . " movie(s).";
         } else {
             // Delete the location
             $deleteQuery = $conn->prepare("DELETE FROM locations WHERE locationID = ?");
@@ -47,15 +50,11 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
             } else {
                 $errorMessage = "Error deleting location: " . $conn->error;
             }
-            
             $deleteQuery->close();
         }
-        
-        $checkMoviesQuery->close();
     } else {
         $errorMessage = "Location not found!";
     }
-    
     $checkQuery->close();
 }
 
@@ -74,7 +73,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_location'])) {
     } else {
         $errorMessage = "Error adding location: " . $stmt->error;
     }
-    
     $stmt->close();
 }
 
@@ -94,7 +92,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_location'])) {
     } else {
         $errorMessage = "Error updating location: " . $stmt->error;
     }
-    
     $stmt->close();
 }
 
@@ -269,6 +266,12 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
@@ -321,26 +324,26 @@ $conn->close();
                                 <?php if ($locations->num_rows > 0): ?>
                                     <?php while ($location = $locations->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $location['locationID']; ?></td>
-                                            <td><?php echo $location['locationName']; ?></td>
-                                            <td><?php echo $location['locationState']; ?></td>
-                                            <td><?php echo $location['locationCountry']; ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationID']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationName']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationState']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationCountry']); ?></td>
                                             <td>
                                                 <span class="status-badge <?php echo $location['locationStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst($location['locationStatus']); ?>
+                                                    <?php echo ucfirst(htmlspecialchars($location['locationStatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
                                                 <button type="button" class="btn btn-sm btn-warning edit-location" 
-                                                        data-id="<?php echo $location['locationID']; ?>"
-                                                        data-name="<?php echo $location['locationName']; ?>"
-                                                        data-state="<?php echo $location['locationState']; ?>"
-                                                        data-country="<?php echo $location['locationCountry']; ?>"
-                                                        data-status="<?php echo $location['locationStatus']; ?>"
+                                                        data-id="<?php echo htmlspecialchars($location['locationID']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($location['locationName']); ?>"
+                                                        data-state="<?php echo htmlspecialchars($location['locationState']); ?>"
+                                                        data-country="<?php echo htmlspecialchars($location['locationCountry']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($location['locationStatus']); ?>"
                                                         data-toggle="modal" data-target="#editLocationModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
-                                                <a href="locations.php?delete=<?php echo $location['locationID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location?')">
+                                                <a href="locations.php?delete=<?php echo htmlspecialchars($location['locationID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location? This may affect movies linked to this location.')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>

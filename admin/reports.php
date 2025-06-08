@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
     header("Location: index.php");
     exit();
 }
@@ -11,55 +11,57 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Get date range for filtering
-$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-d', strtotime('-30 days'));
-$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-d');
-
 // Revenue by movie
+// Using SUM(b.amount) which is populated by the new booking process
 $revenueByMovieQuery = "
     SELECT m.movieID, m.movieTitle, COUNT(b.bookingID) as bookingCount, SUM(b.amount) as totalRevenue
     FROM movietable m
     LEFT JOIN bookingtable b ON m.movieID = b.movieID
-    GROUP BY m.movieID
+    GROUP BY m.movieID, m.movieTitle
     ORDER BY totalRevenue DESC
     LIMIT 10
 ";
 $revenueByMovie = $conn->query($revenueByMovieQuery);
 
-// Revenue by date
+// Revenue by date (needs proper date handling for bookingDate varchar)
+// Assumes movie_schedules.showDate is a DATE type.
 $revenueByDateQuery = "
-    SELECT DATE(CONCAT('2023-', SUBSTRING_INDEX(bookingDate, '-', 1), '-', SUBSTRING_INDEX(bookingDate, '-', -1))) as bookingDateFormatted,
-           COUNT(bookingID) as bookingCount,
-           SUM(amount) as dailyRevenue
-    FROM bookingtable
-    GROUP BY bookingDateFormatted
-    ORDER BY bookingDateFormatted DESC
+    SELECT DATE_FORMAT(ms.showDate, '%Y-%m-%d') as showDateFormatted,
+           COUNT(b.bookingID) as bookingCount,
+           SUM(b.amount) as dailyRevenue
+    FROM bookingtable b
+    JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    GROUP BY showDateFormatted
+    ORDER BY showDateFormatted DESC
     LIMIT 30
 ";
 $revenueByDate = $conn->query($revenueByDateQuery);
 
-// Revenue by theater
+
+// Revenue by theater (bookingTheatre is a varchar, assuming it stores the theater name)
 $revenueByTheaterQuery = "
-    SELECT bookingTheatre, COUNT(bookingID) as bookingCount, SUM(amount) as totalRevenue
-    FROM bookingtable
-    GROUP BY bookingTheatre
+    SELECT b.bookingTheatre, COUNT(b.bookingID) as bookingCount, SUM(b.amount) as totalRevenue
+    FROM bookingtable b
+    GROUP BY b.bookingTheatre
     ORDER BY totalRevenue DESC
 ";
 $revenueByTheater = $conn->query($revenueByTheaterQuery);
 
-// Popular show times
+// Popular show times (bookingTime is varchar, assuming it stores time string like 'HH:MM:SS')
 $popularTimesQuery = "
-    SELECT bookingTime, COUNT(bookingID) as bookingCount
-    FROM bookingtable
-    GROUP BY bookingTime
+    SELECT ms.showTime, COUNT(b.bookingID) as bookingCount
+    FROM bookingtable b
+    JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    GROUP BY ms.showTime
     ORDER BY bookingCount DESC
+    LIMIT 10
 ";
 $popularTimes = $conn->query($popularTimesQuery);
 
@@ -332,7 +334,7 @@ $conn->close();
                     <h1>Reports & Analytics</h1>
                     <div class="admin-user-info">
                         <img src="https://via.placeholder.com/40" alt="Admin">
-                        <span>Welcome, <?php echo $_SESSION['admin_name']; ?></span>
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
@@ -340,7 +342,7 @@ $conn->close();
                     <div class="col-md-4">
                         <div class="stats-card primary">
                             <h3>Total Revenue</h3>
-                            <p>$<?php echo number_format($totalRevenue, 2); ?></p>
+                            <p>₹<?php echo number_format($totalRevenue, 2); ?></p>
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -352,7 +354,7 @@ $conn->close();
                     <div class="col-md-4">
                         <div class="stats-card info">
                             <h3>Avg. Revenue per Booking</h3>
-                            <p>$<?php echo number_format($avgRevenue, 2); ?></p>
+                            <p>₹<?php echo number_format($avgRevenue, 2); ?></p>
                         </div>
                     </div>
                 </div>
@@ -374,9 +376,9 @@ $conn->close();
                             <tbody>
                                 <?php while ($movie = $revenueByMovie->fetch_assoc()): ?>
                                     <tr>
-                                        <td><?php echo $movie['movieTitle']; ?></td>
-                                        <td><?php echo $movie['bookingCount']; ?></td>
-                                        <td>$<?php echo number_format($movie['totalRevenue'], 2); ?></td>
+                                        <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                        <td><?php echo htmlspecialchars($movie['bookingCount']); ?></td>
+                                        <td>₹<?php echo number_format($movie['totalRevenue'], 2); ?></td>
                                     </tr>
                                 <?php endwhile; ?>
                             </tbody>
@@ -410,9 +412,9 @@ $conn->close();
                                     <tbody>
                                         <?php while ($theater = $revenueByTheater->fetch_assoc()): ?>
                                             <tr>
-                                                <td><?php echo ucfirst(str_replace('-', ' ', $theater['bookingTheatre'])); ?></td>
-                                                <td><?php echo $theater['bookingCount']; ?></td>
-                                                <td>$<?php echo number_format($theater['totalRevenue'], 2); ?></td>
+                                                <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))); ?></td>
+                                                <td><?php echo htmlspecialchars($theater['bookingCount']); ?></td>
+                                                <td>₹<?php echo number_format($theater['totalRevenue'], 2); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>
@@ -437,8 +439,8 @@ $conn->close();
                                     <tbody>
                                         <?php while ($time = $popularTimes->fetch_assoc()): ?>
                                             <tr>
-                                                <td><?php echo str_replace('-', ':', $time['bookingTime']); ?></td>
-                                                <td><?php echo $time['bookingCount']; ?></td>
+                                                <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showTime']))); ?></td>
+                                                <td><?php echo htmlspecialchars($time['bookingCount']); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>
@@ -464,12 +466,12 @@ $conn->close();
                     <?php
                     $revenueByMovie->data_seek(0);
                     while ($movie = $revenueByMovie->fetch_assoc()) {
-                        echo "'" . $movie['movieTitle'] . "', ";
+                        echo "'" . addslashes($movie['movieTitle']) . "', ";
                     }
                     ?>
                 ],
                 datasets: [{
-                    label: 'Revenue ($)',
+                    label: 'Revenue (₹)',
                     data: [
                         <?php
                         $revenueByMovie->data_seek(0);
@@ -490,6 +492,15 @@ $conn->close();
                     y: {
                         beginAtZero: true
                     }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ₹' + context.parsed.y.toFixed(2);
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -503,12 +514,12 @@ $conn->close();
                     <?php
                     $revenueByDate->data_seek(0);
                     while ($date = $revenueByDate->fetch_assoc()) {
-                        echo "'" . $date['bookingDateFormatted'] . "', ";
+                        echo "'" . addslashes($date['showDateFormatted']) . "', ";
                     }
                     ?>
                 ],
                 datasets: [{
-                    label: 'Daily Revenue ($)',
+                    label: 'Daily Revenue (₹)',
                     data: [
                         <?php
                         $revenueByDate->data_seek(0);
@@ -530,6 +541,15 @@ $conn->close();
                     y: {
                         beginAtZero: true
                     }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ₹' + context.parsed.y.toFixed(2);
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -543,7 +563,7 @@ $conn->close();
                     <?php
                     $revenueByTheater->data_seek(0);
                     while ($theater = $revenueByTheater->fetch_assoc()) {
-                        echo "'" . ucfirst(str_replace('-', ' ', $theater['bookingTheatre'])) . "', ";
+                        echo "'" . addslashes(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))) . "', ";
                     }
                     ?>
                 ],
@@ -561,21 +581,41 @@ $conn->close();
                         'rgba(54, 162, 235, 0.5)',
                         'rgba(255, 206, 86, 0.5)',
                         'rgba(75, 192, 192, 0.5)',
-                        'rgba(153, 102, 255, 0.5)'
+                        'rgba(153, 102, 255, 0.5)',
+                        'rgba(255, 159, 64, 0.5)',
+                        'rgba(199, 199, 199, 0.5)'
                     ],
                     borderColor: [
                         'rgba(255, 99, 132, 1)',
                         'rgba(54, 162, 235, 1)',
                         'rgba(255, 206, 86, 1)',
                         'rgba(75, 192, 192, 1)',
-                        'rgba(153, 102, 255, 1)'
+                        'rgba(153, 102, 255, 1)',
+                        'rgba(255, 159, 64, 1)',
+                        'rgba(199, 199, 199, 1)'
                     ],
                     borderWidth: 1
                 }]
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed !== null) {
+                                    label += '₹' + context.parsed.toFixed(2);
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -588,7 +628,7 @@ $conn->close();
                     <?php
                     $popularTimes->data_seek(0);
                     while ($time = $popularTimes->fetch_assoc()) {
-                        echo "'" . str_replace('-', ':', $time['bookingTime']) . "', ";
+                        echo "'" . addslashes(date('h:i A', strtotime($time['showTime']))) . "', ";
                     }
                     ?>
                 ],
@@ -612,7 +652,10 @@ $conn->close();
                 maintainAspectRatio: false,
                 scales: {
                     y: {
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1 // Ensure integer steps for counts
+                        }
                     }
                 }
             }

@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible by Super Admin (roleID 1) and Content Manager (roleID 3)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 3)) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -19,6 +19,8 @@ if ($conn->connect_error) {
 }
 
 // Handle movie deletion
+$successMessage = '';
+$errorMessage = '';
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $movieId = $_GET['delete'];
     
@@ -29,21 +31,31 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $result = $checkQuery->get_result();
     
     if ($result->num_rows > 0) {
-        // Delete the movie
-        $deleteQuery = $conn->prepare("DELETE FROM movietable WHERE movieID = ?");
-        $deleteQuery->bind_param("i", $movieId);
-        
-        if ($deleteQuery->execute()) {
-            $successMessage = "Movie deleted successfully!";
+        // IMPORTANT: Check for foreign key dependencies before deleting!
+        // E.g., check movie_schedules table
+        $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE movieID = ?");
+        $checkSchedulesQuery->bind_param("i", $movieId);
+        $checkSchedulesQuery->execute();
+        $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
+        $checkSchedulesQuery->close();
+
+        if ($schedulesCount > 0) {
+            $errorMessage = "Cannot delete movie. It is associated with $schedulesCount schedule(s). Delete schedules first.";
         } else {
-            $errorMessage = "Error deleting movie: " . $conn->error;
+            // Delete the movie
+            $deleteQuery = $conn->prepare("DELETE FROM movietable WHERE movieID = ?");
+            $deleteQuery->bind_param("i", $movieId);
+            
+            if ($deleteQuery->execute()) {
+                $successMessage = "Movie deleted successfully!";
+            } else {
+                $errorMessage = "Error deleting movie: " . $conn->error;
+            }
+            $deleteQuery->close();
         }
-        
-        $deleteQuery->close();
     } else {
         $errorMessage = "Movie not found!";
     }
-    
     $checkQuery->close();
 }
 
@@ -59,8 +71,8 @@ $params = [];
 $types = '';
 
 if (!empty($search)) {
+    $searchParam = "%" . $search . "%";
     $searchCondition = "WHERE movieTitle LIKE ? OR movieGenre LIKE ? OR movieDirector LIKE ?";
-    $searchParam = "%$search%";
     $params = [$searchParam, $searchParam, $searchParam];
     $types = "sss";
 }
@@ -68,15 +80,13 @@ if (!empty($search)) {
 // Count total records for pagination
 $countQuery = "SELECT COUNT(*) as total FROM movietable $searchCondition";
 
+$stmtCount = $conn->prepare($countQuery);
 if (!empty($searchCondition)) {
-    $stmt = $conn->prepare($countQuery);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $totalRecords = $stmt->get_result()->fetch_assoc()['total'];
-    $stmt->close();
-} else {
-    $totalRecords = $conn->query($countQuery)->fetch_assoc()['total'];
+    $stmtCount->bind_param($types, ...$params);
 }
+$stmtCount->execute();
+$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
+$stmtCount->close();
 
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
@@ -90,11 +100,16 @@ $query = "SELECT m.*, l.locationName
 
 $stmt = $conn->prepare($query);
 
+// Rebind parameters for the main query
+$query_params = $params; // Copy search parameters
+$query_types = $types; // Copy search types
+
+$query_params[] = $offset;
+$query_params[] = $recordsPerPage;
+$query_types .= "ii";
+
 if (!empty($searchCondition)) {
-    $params[] = $offset;
-    $params[] = $recordsPerPage;
-    $types .= "ii";
-    $stmt->bind_param($types, ...$params);
+    $stmt->bind_param($query_types, ...$query_params);
 } else {
     $stmt->bind_param("ii", $offset, $recordsPerPage);
 }
@@ -270,6 +285,12 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
@@ -342,23 +363,23 @@ $conn->close();
                                 <?php if ($movies->num_rows > 0): ?>
                                     <?php while ($movie = $movies->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $movie['movieID']; ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                             <td>
-                                                <img src="<?php echo '../' . $movie['movieImg']; ?>" alt="<?php echo $movie['movieTitle']; ?>" class="movie-image">
+                                                <img src="<?php echo '../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image">
                                             </td>
-                                            <td><?php echo $movie['movieTitle']; ?></td>
-                                            <td><?php echo $movie['movieGenre']; ?></td>
-                                            <td><?php echo $movie['movieDuration']; ?> min</td>
-                                            <td><?php echo $movie['movieRelDate']; ?></td>
-                                            <td><?php echo $movie['locationName'] ?? 'N/A'; ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
+                                            <td><?php echo htmlspecialchars($movie['movieRelDate']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <a href="edit_movie.php?id=<?php echo $movie['movieID']; ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="movies.php?delete=<?php echo $movie['movieID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie?')">
+                                                <a href="movies.php?delete=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
-                                                <a href="../view_movie.php?id=<?php echo $movie['movieID']; ?>" class="btn btn-sm btn-info" target="_blank">
+                                                <a href="../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-info" target="_blank">
                                                     <i class="fas fa-eye"></i>
                                                 </a>
                                             </td>

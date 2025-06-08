@@ -1,15 +1,9 @@
 <?php
 session_start();
 
-// Check if user is logged in
+// RBAC: Accessible by all logged-in admins (roleID 1, 2, 3)
 if (!isset($_SESSION['admin_id'])) {
     header("Location: index.php");
-    exit();
-}
-
-// Redirect Theater Managers to their specific dashboard
-if (isset($_SESSION['admin_role']) && $_SESSION['admin_role'] == 2) {
-    header("Location: theater_manager/dashboard.php");
     exit();
 }
 
@@ -17,7 +11,7 @@ if (isset($_SESSION['admin_role']) && $_SESSION['admin_role'] == 2) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -29,21 +23,31 @@ $movieCount = $conn->query("SELECT COUNT(*) as count FROM movietable")->fetch_as
 $bookingCount = $conn->query("SELECT COUNT(*) as count FROM bookingtable")->fetch_assoc()['count'];
 $userCount = $conn->query("SELECT COUNT(*) as count FROM users")->fetch_assoc()['count'];
 $theaterCount = $conn->query("SELECT COUNT(*) as count FROM theaters")->fetch_assoc()['count'];
+$scheduleCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules")->fetch_assoc()['count']; // Added schedule count
 
-// Get recent bookings
-$recentBookings = $conn->query("
-    SELECT b.*, m.movieTitle, u.name as userName
+// Get recent bookings (more comprehensive join)
+$recentBookingsQuery = "
+    SELECT b.bookingID, b.bookingFName, b.bookingLName, b.bookingEmail, b.bookingPNumber, b.seats, b.amount,
+           m.movieTitle, m.movieImg,
+           ms.showDate, ms.showTime,
+           t.theaterName, h.hallName
     FROM bookingtable b
     LEFT JOIN movietable m ON b.movieID = m.movieID
-    LEFT JOIN users u ON b.bookingEmail = u.username -- Assuming bookingEmail maps to user username (email)
-    ORDER BY bookingID DESC LIMIT 5
-");
+    LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    LEFT JOIN theater_halls h ON b.hallID = h.hallID
+    LEFT JOIN theaters t ON h.theaterID = t.theaterID
+    ORDER BY b.bookingID DESC LIMIT 5
+";
+$recentBookings = $conn->query($recentBookingsQuery);
 
 // Get recent movies
-$recentMovies = $conn->query("
-    SELECT * FROM movietable
-    ORDER BY movieID DESC LIMIT 5
-");
+$recentMoviesQuery = "
+    SELECT m.movieID, m.movieTitle, m.movieGenre, m.movieDuration, m.movieImg, l.locationName
+    FROM movietable m
+    LEFT JOIN locations l ON m.locationID = l.locationID
+    ORDER BY m.movieID DESC LIMIT 5
+";
+$recentMovies = $conn->query($recentMoviesQuery);
 
 $conn->close();
 ?>
@@ -126,7 +130,7 @@ $conn->close();
             margin-left: 240px;
             padding: 20px;
         }
-        .summary-card {
+        .dashboard-card {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -134,22 +138,17 @@ $conn->close();
             text-align: center;
             margin-bottom: 20px;
         }
-        .summary-card h4 {
+        .dashboard-card h4 {
             font-size: 1.2rem;
             color: #6c757d;
-            margin-bottom: 10px;
         }
-        .summary-card .count {
+        .dashboard-card p {
             font-size: 2.5rem;
             font-weight: bold;
-            color: #007bff;
+            margin-top: 10px;
+            color: #343a40;
         }
-        .summary-card.movies .count { color: #28a745; }
-        .summary-card.bookings .count { color: #ffc107; }
-        .summary-card.users .count { color: #17a2b8; }
-        .summary-card.theaters .count { color: #6f42c1; }
-
-        .dashboard-section {
+        .recent-table-container {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -160,16 +159,7 @@ $conn->close();
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-        }
-        .movie-image {
-            width: 50px;
-            height: 70px;
-            object-fit: cover;
-            border-radius: 3px;
-        }
-        .table-responsive {
-            margin-top: 15px;
+            margin-bottom: 30px;
         }
         .admin-user-info {
             display: flex;
@@ -195,7 +185,13 @@ $conn->close();
         .btn-signout:hover {
             background-color: #c82333;
         }
-
+        .movie-image-mini {
+            width: 40px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 3px;
+        }
+        
         /* Mobile responsiveness */
         @media (max-width: 768px) {
             .sidebar {
@@ -216,6 +212,9 @@ $conn->close();
             }
             .admin-user-info {
                 margin-top: 15px;
+            }
+            .table-responsive {
+                overflow-x: auto;
             }
         }
     </style>
@@ -297,117 +296,120 @@ $conn->close();
                 <div class="admin-header">
                     <h1>Dashboard</h1>
                     <div class="admin-user-info">
-                        <img src="https://via.placeholder.com/40" alt="Admin Avatar">
+                        <img src="https://via.placeholder.com/40" alt="Admin">
                         <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
                 <div class="row">
                     <div class="col-md-3">
-                        <div class="summary-card movies">
+                        <div class="dashboard-card">
                             <h4>Total Movies</h4>
-                            <div class="count"><?php echo $movieCount; ?></div>
+                            <p><?php echo $movieCount; ?></p>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="summary-card bookings">
+                        <div class="dashboard-card">
                             <h4>Total Bookings</h4>
-                            <div class="count"><?php echo $bookingCount; ?></div>
+                            <p><?php echo $bookingCount; ?></p>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="summary-card users">
+                        <div class="dashboard-card">
                             <h4>Total Users</h4>
-                            <div class="count"><?php echo $userCount; ?></div>
+                            <p><?php echo $userCount; ?></p>
                         </div>
                     </div>
                     <div class="col-md-3">
-                        <div class="summary-card theaters">
+                        <div class="dashboard-card">
                             <h4>Total Theaters</h4>
-                            <div class="count"><?php echo $theaterCount; ?></div>
+                            <p><?php echo $theaterCount; ?></p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="dashboard-card">
+                            <h4>Total Schedules</h4>
+                            <p><?php echo $scheduleCount; ?></p>
                         </div>
                     </div>
                 </div>
 
-                <div class="dashboard-section">
-                    <h3>Recent Bookings</h3>
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Movie</th>
-                                    <th>Customer</th>
-                                    <th>Date</th>
-                                    <th>Time</th>
-                                    <th>Amount</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($recentBookings->num_rows > 0): ?>
-                                    <?php while ($booking = $recentBookings->fetch_assoc()): ?>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="recent-table-container">
+                            <h3 class="mb-3">Recent Bookings</h3>
+                            <div class="table-responsive">
+                                <table class="table table-striped table-sm">
+                                    <thead>
                                         <tr>
-                                            <td><?php echo $booking['bookingID']; ?></td>
-                                            <td><?php echo $booking['movieTitle'] ?? 'N/A'; ?></td>
-                                            <td><?php echo $booking['bookingFName'] . ' ' . $booking['bookingLName']; ?></td>
-                                            <td><?php echo $booking['bookingDate']; ?></td>
-                                            <td><?php echo $booking['bookingTime']; ?></td>
-                                            <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
-                                            <td>
-                                                <a href="view_booking.php?id=<?php echo $booking['bookingID']; ?>" class="btn btn-sm btn-info">
-                                                    <i class="fas fa-eye"></i> View
-                                                </a>
-                                            </td>
+                                            <th>ID</th>
+                                            <th>Movie</th>
+                                            <th>Customer</th>
+                                            <th>Date</th>
+                                            <th>Time</th>
+                                            <th>Amount</th>
                                         </tr>
-                                    <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="7" class="text-center">No recent bookings</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                                    </thead>
+                                    <tbody>
+                                        <?php if ($recentBookings->num_rows > 0): ?>
+                                            <?php while ($booking = $recentBookings->fetch_assoc()): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($booking['bookingID']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['bookingFName'] . ' ' . $booking['bookingLName']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showDate'] ? date('Y-m-d', strtotime($booking['showDate'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showTime'] ? date('H:i', strtotime($booking['showTime'])) : 'N/A'); ?></td>
+                                                    <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
+                                                </tr>
+                                            <?php endwhile; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="6" class="text-center">No recent bookings</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <a href="bookings.php" class="btn btn-primary btn-sm">View All Bookings</a>
+                        </div>
                     </div>
-                    <a href="bookings.php" class="btn btn-primary btn-sm mt-3">View All Bookings</a>
-                </div>
-
-                <div class="dashboard-section">
-                    <h3>Recent Movies Added</h3>
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Title</th>
-                                    <th>Genre</th>
-                                    <th>Duration</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($recentMovies->num_rows > 0): ?>
-                                    <?php while ($movie = $recentMovies->fetch_assoc()): ?>
+                    <div class="col-md-6">
+                        <div class="recent-table-container">
+                            <h3 class="mb-3">Recent Movies</h3>
+                            <div class="table-responsive">
+                                <table class="table table-striped table-sm">
+                                    <thead>
                                         <tr>
-                                            <td><?php echo $movie['movieID']; ?></td>
-                                            <td><?php echo $movie['movieTitle']; ?></td>
-                                            <td><?php echo $movie['movieGenre']; ?></td>
-                                            <td><?php echo $movie['movieDuration']; ?> min</td>
-                                            <td>
-                                                <a href="edit_movie.php?id=<?php echo $movie['movieID']; ?>" class="btn btn-sm btn-warning">
-                                                    <i class="fas fa-edit"></i>
-                                                </a>
-                                            </td>
+                                            <th>ID</th>
+                                            <th>Image</th>
+                                            <th>Title</th>
+                                            <th>Genre</th>
+                                            <th>Duration</th>
                                         </tr>
-                                    <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="5" class="text-center">No movies found</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                        <a href="movies.php" class="btn btn-primary btn-sm mt-3">View All Movies</a>
+                                    </thead>
+                                    <tbody>
+                                        <?php if ($recentMovies->num_rows > 0): ?>
+                                            <?php while ($movie = $recentMovies->fetch_assoc()): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
+                                                    <td>
+                                                        <img src="<?php echo '../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image-mini">
+                                                    </td>
+                                                    <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
+                                                </tr>
+                                            <?php endwhile; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center">No movies found</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <a href="movies.php" class="btn btn-primary btn-sm">View All Movies</a>
+                        </div>
                     </div>
                 </div>
             </main>

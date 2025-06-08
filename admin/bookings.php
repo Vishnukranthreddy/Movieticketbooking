@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "cinema_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -20,33 +20,76 @@ if ($conn->connect_error) {
 
 // Pagination
 $limit = 10;
-$page = isset($_GET['page']) ? $_GET['page'] : 1;
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $start = ($page - 1) * $limit;
 
 // Search functionality
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
+$params = [];
+$types = '';
+
 if (!empty($search)) {
-    $searchCondition = " WHERE b.bookingFName LIKE '%$search%' OR b.bookingLName LIKE '%$search%' OR b.bookingEmail LIKE '%$search%' OR m.movieTitle LIKE '%$search%'";
+    // Search across customer names, email, movie title, and theater name
+    $searchParam = "%" . $search . "%";
+    $searchCondition = " WHERE b.bookingFName LIKE ? OR b.bookingLName LIKE ? OR b.bookingEmail LIKE ? OR m.movieTitle LIKE ? OR t.theaterName LIKE ?";
+    $params = [$searchParam, $searchParam, $searchParam, $searchParam, $searchParam];
+    $types = "sssss";
 }
 
 // Get total bookings count
-$totalQuery = "SELECT COUNT(*) as total FROM bookingtable b LEFT JOIN movietable m ON b.movieID = m.movieID $searchCondition";
-$totalResult = $conn->query($totalQuery);
+$totalQuery = "
+    SELECT COUNT(*) as total
+    FROM bookingtable b
+    LEFT JOIN movietable m ON b.movieID = m.movieID
+    LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    LEFT JOIN theater_halls h ON b.hallID = h.hallID
+    LEFT JOIN theaters t ON h.theaterID = t.theaterID
+    " . $searchCondition;
+
+$stmtCount = $conn->prepare($totalQuery);
+if (!empty($searchCondition)) {
+    $stmtCount->bind_param($types, ...$params);
+}
+$stmtCount->execute();
+$totalResult = $stmtCount->get_result();
 $totalRow = $totalResult->fetch_assoc();
 $total = $totalRow['total'];
 $pages = ceil($total / $limit);
+$stmtCount->close();
 
 // Get bookings with pagination
 $bookingsQuery = "
-    SELECT b.*, m.movieTitle 
+    SELECT b.*, m.movieTitle, m.movieGenre, m.movieDuration,
+           ms.showDate, ms.showTime, ms.price as scheduledPrice,
+           h.hallName, h.hallType,
+           t.theaterName
     FROM bookingtable b
     LEFT JOIN movietable m ON b.movieID = m.movieID
-    $searchCondition
+    LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    LEFT JOIN theater_halls h ON b.hallID = h.hallID
+    LEFT JOIN theaters t ON h.theaterID = t.theaterID
+    " . $searchCondition . "
     ORDER BY b.bookingID DESC
-    LIMIT $start, $limit
-";
-$bookings = $conn->query($bookingsQuery);
+    LIMIT ?, ?";
+
+$stmtBookings = $conn->prepare($bookingsQuery);
+// Create a new array for parameters for the main query as bind_param needs references
+$query_params = $params;
+$query_types = $types;
+
+$query_params[] = $start;
+$query_params[] = $limit;
+$query_types .= "ii"; // Add integer types for limit and offset
+
+if (!empty($searchCondition)) {
+    $stmtBookings->bind_param($query_types, ...$query_params);
+} else {
+    $stmtBookings->bind_param("ii", $start, $limit);
+}
+$stmtBookings->execute();
+$bookings = $stmtBookings->get_result();
+$stmtBookings->close();
 
 $conn->close();
 ?>
@@ -262,6 +305,12 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
@@ -276,7 +325,7 @@ $conn->close();
                     <h1>Bookings Management</h1>
                     <div class="admin-user-info">
                         <img src="https://via.placeholder.com/40" alt="Admin">
-                        <span>Welcome, <?php echo $_SESSION['admin_name']; ?></span>
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
@@ -295,17 +344,21 @@ $conn->close();
                     </div>
 
                     <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
+                        <table class="table table-striped table-hover">
+                            <thead class="thead-dark">
                                 <tr>
-                                    <th>ID</th>
+                                    <th>Booking ID</th>
+                                    <th>Order ID</th>
                                     <th>Movie</th>
-                                    <th>Customer</th>
+                                    <th>Customer Name</th>
                                     <th>Email</th>
                                     <th>Phone</th>
                                     <th>Date</th>
                                     <th>Time</th>
-                                    <th>Theatre</th>
+                                    <th>Theater</th>
+                                    <th>Hall</th>
+                                    <th>Seats</th>
+                                    <th>Amount</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -313,30 +366,35 @@ $conn->close();
                                 <?php if ($bookings->num_rows > 0): ?>
                                     <?php while ($booking = $bookings->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $booking['bookingID']; ?></td>
-                                            <td><?php echo $booking['movieTitle']; ?></td>
-                                            <td><?php echo $booking['bookingFName'] . ' ' . $booking['bookingLName']; ?></td>
-                                            <td><?php echo $booking['bookingEmail']; ?></td>
-                                            <td><?php echo $booking['bookingPNumber']; ?></td>
-                                            <td><?php echo $booking['bookingDate']; ?></td>
-                                            <td><?php echo $booking['bookingTime']; ?></td>
-                                            <td><?php echo $booking['bookingTheatre']; ?></td>
+                                            <td><?php echo htmlspecialchars($booking['bookingID']); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['ORDERID']); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['bookingFName'] . ' ' . $booking['bookingLName']); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['bookingEmail']); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['bookingPNumber']); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['showDate'] ? date('Y-m-d', strtotime($booking['showDate'])) : 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['showTime'] ? date('H:i', strtotime($booking['showTime'])) : 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['theaterName'] ?? 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($booking['hallName'] ?? 'N/A'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($booking['hallType'] ?? ''))); ?>)</td>
+                                            <td><?php echo htmlspecialchars($booking['seats'] ?? 'N/A'); ?></td>
+                                            <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
                                             <td>
-                                                <a href="view_booking.php?id=<?php echo $booking['bookingID']; ?>" class="btn btn-sm btn-info">
+                                                <a href="view_booking.php?id=<?php echo htmlspecialchars($booking['bookingID']); ?>" class="btn btn-sm btn-info" title="View Details">
                                                     <i class="fas fa-eye"></i>
                                                 </a>
-                                                <a href="edit_booking.php?id=<?php echo $booking['bookingID']; ?>" class="btn btn-sm btn-primary">
+                                                <!-- Add edit/delete links if functionality exists -->
+                                                <!-- <a href="edit_booking.php?id=<?php echo htmlspecialchars($booking['bookingID']); ?>" class="btn btn-sm btn-primary" title="Edit Booking">
                                                     <i class="fas fa-edit"></i>
-                                                </a>
-                                                <a href="delete_booking.php?id=<?php echo $booking['bookingID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this booking?')">
+                                                </a> -->
+                                                <!-- <a href="delete_booking.php?id=<?php echo htmlspecialchars($booking['bookingID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this booking?')" title="Delete Booking">
                                                     <i class="fas fa-trash"></i>
-                                                </a>
+                                                </a> -->
                                             </td>
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>
                                     <tr>
-                                        <td colspan="9" class="text-center">No bookings found</td>
+                                        <td colspan="13" class="text-center">No bookings found</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>
@@ -349,7 +407,7 @@ $conn->close();
                             <ul class="pagination">
                                 <?php if ($page > 1): ?>
                                     <li class="page-item">
-                                        <a class="page-link" href="?page=<?php echo $page-1; ?><?php echo !empty($search) ? '&search='.$search : ''; ?>" aria-label="Previous">
+                                        <a class="page-link" href="?page=<?php echo $page-1; ?><?php echo !empty($search) ? '&search='.urlencode($search) : ''; ?>" aria-label="Previous">
                                             <span aria-hidden="true">&laquo;</span>
                                         </a>
                                     </li>
@@ -357,7 +415,7 @@ $conn->close();
                                 
                                 <?php for ($i = 1; $i <= $pages; $i++): ?>
                                     <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo !empty($search) ? '&search='.$search : ''; ?>">
+                                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo !empty($search) ? '&search='.urlencode($search) : ''; ?>">
                                             <?php echo $i; ?>
                                         </a>
                                     </li>
@@ -365,7 +423,7 @@ $conn->close();
                                 
                                 <?php if ($page < $pages): ?>
                                     <li class="page-item">
-                                        <a class="page-link" href="?page=<?php echo $page+1; ?><?php echo !empty($search) ? '&search='.$search : ''; ?>" aria-label="Next">
+                                        <a class="page-link" href="?page=<?php echo $page+1; ?><?php echo !empty($search) ? '&search='.urlencode($search) : ''; ?>" aria-label="Next">
                                             <span aria-hidden="true">&raquo;</span>
                                         </a>
                                     </li>

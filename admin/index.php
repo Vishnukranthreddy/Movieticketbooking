@@ -1,11 +1,17 @@
 <?php
 session_start();
 
+// Check if already logged in, redirect to dashboard
+if (isset($_SESSION['admin_id'])) {
+    header("Location: dashboard.php");
+    exit();
+}
+
 // Database connection
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -27,13 +33,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if ($result->num_rows > 0) {
         $admin = $result->fetch_assoc();
-        // Verify the password
-        if (password_verify($input_password, $admin['password'])) { // Using password_verify as admin_users passwords should be hashed
+        // Verify the password (assuming it's hashed in the database as per combined SQL)
+        if (password_verify($input_password, $admin['password'])) {
             // Set session variables
             $_SESSION['admin_id'] = $admin['adminID'];
             $_SESSION['admin_username'] = $admin['username'];
             $_SESSION['admin_name'] = $admin['fullName'];
-            $_SESSION['admin_role'] = $admin['roleID']; // Store the roleID
+            $_SESSION['admin_role'] = $admin['roleID']; // IMPORTANT: Store the roleID
 
             // Update last login time
             $updateQuery = $conn->prepare("UPDATE admin_users SET lastLogin = NOW() WHERE adminID = ?");
@@ -41,17 +47,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $updateQuery->execute();
             $updateQuery->close();
 
-            // Redirect based on role
+            // Redirect to dashboard
             $_SESSION['just_logged_in'] = true;
-            if ($_SESSION['admin_role'] == 1) { // Super Admin
-                header("Location: dashboard.php");
-            } elseif ($_SESSION['admin_role'] == 2) { // Theater Manager
-                header("Location: theater_manager/dashboard.php"); // Redirect to specific dashboard
-            } else {
-                // Default redirect or error for other roles
-                $error = "Unauthorized role.";
-                session_destroy(); // Destroy session if role is not handled
-            }
+            header("Location: dashboard.php");
             exit();
         } else {
             $error = "Invalid username or password.";
@@ -156,7 +154,7 @@ $conn->close();
             </form>
             
             <div class="back-link">
-                <a href="../index.php"><i class="fas fa-arrow-left"></i> Back to Website</a>
+                <a href="../user/index.php"><i class="fas fa-arrow-left"></i> Back to Website</a>
             </div>
         </div>
     </div>

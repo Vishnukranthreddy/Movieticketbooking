@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -19,6 +19,8 @@ if ($conn->connect_error) {
 }
 
 // Handle schedule deletion
+$successMessage = '';
+$errorMessage = '';
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $scheduleId = $_GET['delete'];
     
@@ -34,9 +36,10 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
         $checkBookingsQuery->bind_param("i", $scheduleId);
         $checkBookingsQuery->execute();
         $bookingsCount = $checkBookingsQuery->get_result()->fetch_assoc()['count'];
+        $checkBookingsQuery->close();
         
         if ($bookingsCount > 0) {
-            $errorMessage = "Cannot delete schedule. It is associated with $bookingsCount booking(s).";
+            $errorMessage = "Cannot delete schedule. It is associated with " . $bookingsCount . " booking(s).";
         } else {
             // Delete the schedule
             $deleteQuery = $conn->prepare("DELETE FROM movie_schedules WHERE scheduleID = ?");
@@ -47,15 +50,11 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
             } else {
                 $errorMessage = "Error deleting schedule: " . $conn->error;
             }
-            
             $deleteQuery->close();
         }
-        
-        $checkBookingsQuery->close();
     } else {
         $errorMessage = "Schedule not found!";
     }
-    
     $checkQuery->close();
 }
 
@@ -69,14 +68,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $status = $_POST['status'];
     
     $stmt = $conn->prepare("INSERT INTO movie_schedules (movieID, hallID, showDate, showTime, price, scheduleStatus) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("iissds", $movieId, $hallId, $showDate, $showTime, $price, $status);
+    $stmt->bind_param("iissds", $movieId, $hallId, $showDate, $showTime, $price, $status); // Use 'd' for decimal/double
     
     if ($stmt->execute()) {
         $successMessage = "Schedule added successfully!";
     } else {
         $errorMessage = "Error adding schedule: " . $stmt->error;
     }
-    
     $stmt->close();
 }
 
@@ -104,8 +102,8 @@ $params = [];
 $types = '';
 
 if (!empty($search)) {
+    $searchParam = "%" . $search . "%";
     $searchCondition = "WHERE m.movieTitle LIKE ? OR t.theaterName LIKE ?";
-    $searchParam = "%$search%";
     $params = [$searchParam, $searchParam];
     $types = "ss";
 }
@@ -117,18 +115,15 @@ $countQuery = "
     JOIN movietable m ON ms.movieID = m.movieID
     JOIN theater_halls h ON ms.hallID = h.hallID
     JOIN theaters t ON h.theaterID = t.theaterID
-    $searchCondition
-";
+    " . $searchCondition;
 
+$stmtCount = $conn->prepare($countQuery);
 if (!empty($searchCondition)) {
-    $stmt = $conn->prepare($countQuery);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $totalRecords = $stmt->get_result()->fetch_assoc()['total'];
-    $stmt->close();
-} else {
-    $totalRecords = $conn->query($countQuery)->fetch_assoc()['total'];
+    $stmtCount->bind_param($types, ...$params);
 }
+$stmtCount->execute();
+$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
+$stmtCount->close();
 
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
@@ -139,18 +134,22 @@ $query = "
     JOIN movietable m ON ms.movieID = m.movieID
     JOIN theater_halls h ON ms.hallID = h.hallID
     JOIN theaters t ON h.theaterID = t.theaterID
-    $searchCondition
+    " . $searchCondition . "
     ORDER BY ms.showDate DESC, ms.showTime DESC
-    LIMIT ?, ?
-";
+    LIMIT ?, ?";
 
 $stmt = $conn->prepare($query);
 
+// Rebind parameters for the main query
+$query_params = $params; // Copy search parameters
+$query_types = $types; // Copy search types
+
+$query_params[] = $offset;
+$query_params[] = $recordsPerPage;
+$query_types .= "ii";
+
 if (!empty($searchCondition)) {
-    $params[] = $offset;
-    $params[] = $recordsPerPage;
-    $types .= "ii";
-    $stmt->bind_param($types, ...$params);
+    $stmt->bind_param($query_types, ...$query_params);
 } else {
     $stmt->bind_param("ii", $offset, $recordsPerPage);
 }
@@ -341,6 +340,12 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
@@ -414,26 +419,26 @@ $conn->close();
                                 <?php if ($schedules->num_rows > 0): ?>
                                     <?php while ($schedule = $schedules->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $schedule['scheduleID']; ?></td>
-                                            <td><?php echo $schedule['movieTitle']; ?></td>
-                                            <td><?php echo $schedule['theaterName']; ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['movieTitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
                                             <td>
-                                                <?php echo $schedule['hallName']; ?> 
-                                                <span class="hall-type">(<?php echo str_replace('-', ' ', $schedule['hallType']); ?>)</span>
+                                                <?php echo htmlspecialchars($schedule['hallName']); ?> 
+                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</span>
                                             </td>
-                                            <td><?php echo date('d M Y', strtotime($schedule['showDate'])); ?></td>
-                                            <td><?php echo date('h:i A', strtotime($schedule['showTime'])); ?></td>
+                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showDate']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showTime']))); ?></td>
                                             <td>₹<?php echo number_format($schedule['price'], 2); ?></td>
                                             <td>
-                                                <span class="status-badge status-<?php echo $schedule['scheduleStatus']; ?>">
-                                                    <?php echo ucfirst($schedule['scheduleStatus']); ?>
+                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['scheduleStatus']); ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($schedule['scheduleStatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_schedule.php?id=<?php echo $schedule['scheduleID']; ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="schedules.php?delete=<?php echo $schedule['scheduleID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule?')">
+                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
@@ -498,9 +503,11 @@ $conn->close();
                             <label for="movieId">Movie</label>
                             <select class="form-control" id="movieId" name="movieId" required>
                                 <option value="">Select Movie</option>
-                                <?php while ($movie = $movies->fetch_assoc()): ?>
-                                    <option value="<?php echo $movie['movieID']; ?>">
-                                        <?php echo $movie['movieTitle']; ?>
+                                <?php // Reset movie results pointer if already fetched
+                                if ($movies->num_rows > 0) $movies->data_seek(0);
+                                while ($movie = $movies->fetch_assoc()): ?>
+                                    <option value="<?php echo htmlspecialchars($movie['movieID']); ?>">
+                                        <?php echo htmlspecialchars($movie['movieTitle']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
@@ -509,9 +516,11 @@ $conn->close();
                             <label for="hallId">Theater Hall</label>
                             <select class="form-control" id="hallId" name="hallId" required>
                                 <option value="">Select Theater Hall</option>
-                                <?php while ($hall = $halls->fetch_assoc()): ?>
-                                    <option value="<?php echo $hall['hallID']; ?>">
-                                        <?php echo $hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'; ?>
+                                <?php // Reset hall results pointer if already fetched
+                                if ($halls->num_rows > 0) $halls->data_seek(0);
+                                while ($hall = $halls->fetch_assoc()): ?>
+                                    <option value="<?php echo htmlspecialchars($hall['hallID']); ?>">
+                                        <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>

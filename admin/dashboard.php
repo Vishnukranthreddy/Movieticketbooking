@@ -1,8 +1,9 @@
 <?php
 session_start();
 
-// RBAC: Accessible only by Super Admin (roleID 1)
-if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
+// RBAC: Accessible by all logged-in admins (roleID 1, 2, 3)
+// Role IDs: 1=Super Admin, 2=Theater Manager, 3=Content Manager
+if (!isset($_SESSION['admin_id'])) {
     header("Location: index.php");
     exit();
 }
@@ -255,6 +256,12 @@ $conn->close();
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php"> <!-- Corrected: Stays in admin/ for Super Admin's comprehensive reports -->
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
                             <span>Theater Management</span>
                         </h6>
@@ -283,9 +290,9 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/reports.php">
+                            <a class="nav-link" href="../theater_manager/reports.php"> <!-- Theater Manager's specific reports -->
                                 <i class="fas fa-chart-bar"></i>
-                                Reports
+                                Theater Reports
                             </a>
                         </li>
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">

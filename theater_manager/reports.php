@@ -2,17 +2,8 @@
 session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
-// Current reports.php in admin/ should be for Super Admin ONLY if there's a separate Theater Manager report.
-// Given the structure, let's assume this admin/reports.php is the *main* report for Super Admin
-// and Theater Manager has its own. So, this page should be roleID 1 only.
-// If you intend for Theater Managers to see THIS reports page, then the RBAC check below is fine.
-// Based on our conversation, Super Admin can see ALL, Theater Manager specific to theater data, Content Manager specific to movie data.
-// So, this main `admin/reports.php` should indeed be for Super Admin only for comprehensive data.
-// The provided code snippet was for `theater_manager/reports.php` effectively.
-// Let's assume this `admin/reports.php` is the *Super Admin's comprehensive report*.
-
-if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) { // Only Super Admin (roleID 1)
-    header("Location: index.php");
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -27,19 +18,17 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Revenue by movie
-$revenueByMovieQuery = "
+// Fetch all data for reports
+$revenueByMovieResult = $conn->query("
     SELECT m.movieID, m.movieTitle, COUNT(b.bookingID) as bookingCount, SUM(b.amount) as totalRevenue
     FROM movietable m
     LEFT JOIN bookingtable b ON m.movieID = b.movieID
     GROUP BY m.movieID, m.movieTitle
     ORDER BY totalRevenue DESC
     LIMIT 10
-";
-$revenueByMovie = $conn->query($revenueByMovieQuery);
+");
 
-// Revenue by date
-$revenueByDateQuery = "
+$revenueByDateResult = $conn->query("
     SELECT DATE_FORMAT(ms.showDate, '%Y-%m-%d') as showDateFormatted,
            COUNT(b.bookingID) as bookingCount,
            SUM(b.amount) as dailyRevenue
@@ -48,42 +37,66 @@ $revenueByDateQuery = "
     GROUP BY showDateFormatted
     ORDER BY showDateFormatted DESC
     LIMIT 30
-";
-$revenueByDate = $conn->query($revenueByDateQuery);
+");
 
-
-// Revenue by theater
-$revenueByTheaterQuery = "
+$revenueByTheaterResult = $conn->query("
     SELECT b.bookingTheatre, COUNT(b.bookingID) as bookingCount, SUM(b.amount) as totalRevenue
     FROM bookingtable b
     GROUP BY b.bookingTheatre
     ORDER BY totalRevenue DESC
-";
-$revenueByTheater = $conn->query($revenueByTheaterQuery);
+");
 
-// Popular show times
-$popularTimesQuery = "
+$popularTimesResult = $conn->query("
     SELECT ms.showTime, COUNT(b.bookingID) as bookingCount
     FROM bookingtable b
     JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
     GROUP BY ms.showTime
     ORDER BY bookingCount DESC
     LIMIT 10
-";
-$popularTimes = $conn->query($popularTimesQuery);
+");
 
-// Total revenue
-$totalRevenueQuery = "SELECT SUM(amount) as totalRevenue FROM bookingtable";
-$totalRevenueResult = $conn->query($totalRevenueQuery);
-$totalRevenue = $totalRevenueResult->fetch_assoc()['totalRevenue'] ?? 0;
-
-// Total bookings
-$totalBookingsQuery = "SELECT COUNT(*) as totalBookings FROM bookingtable";
-$totalBookingsResult = $conn->query($totalBookingsQuery);
-$totalBookings = $totalBookingsResult->fetch_assoc()['totalBookings'] ?? 0;
-
-// Average revenue per booking
+// Total revenue and bookings
+$totalRevenue = $conn->query("SELECT SUM(amount) as totalRevenue FROM bookingtable")->fetch_assoc()['totalRevenue'] ?? 0;
+$totalBookings = $conn->query("SELECT COUNT(*) as totalBookings FROM bookingtable")->fetch_assoc()['totalBookings'] ?? 0;
 $avgRevenue = $totalBookings > 0 ? $totalRevenue / $totalBookings : 0;
+
+// Prepare data for Chart.js in PHP variables
+$revenueByMovieLabels = [];
+$revenueByMovieData = [];
+if ($revenueByMovieResult->num_rows > 0) {
+    while($row = $revenueByMovieResult->fetch_assoc()) {
+        $revenueByMovieLabels[] = $row['movieTitle'];
+        $revenueByMovieData[] = $row['totalRevenue'];
+    }
+}
+
+$revenueByDateLabels = [];
+$revenueByDateData = [];
+if ($revenueByDateResult->num_rows > 0) {
+    while($row = $revenueByDateResult->fetch_assoc()) {
+        $revenueByDateLabels[] = $row['showDateFormatted'];
+        $revenueByDateData[] = $row['dailyRevenue'];
+    }
+}
+
+$revenueByTheaterLabels = [];
+$revenueByTheaterData = [];
+if ($revenueByTheaterResult->num_rows > 0) {
+    while($row = $revenueByTheaterResult->fetch_assoc()) {
+        $revenueByTheaterLabels[] = ucfirst(str_replace('-', ' ', $row['bookingTheatre']));
+        $revenueByTheaterData[] = $row['totalRevenue'];
+    }
+}
+
+$popularTimesLabels = [];
+$popularTimesData = [];
+if ($popularTimesResult->num_rows > 0) {
+    while($row = $popularTimesResult->fetch_assoc()) {
+        $popularTimesLabels[] = date('h:i A', strtotime($row['showTime']));
+        $popularTimesData[] = $row['bookingCount'];
+    }
+}
+
 
 $conn->close();
 ?>
@@ -268,7 +281,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="logout.php">Sign out</a>
+                <a class="btn btn-signout" href="../admin/logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -279,7 +292,7 @@ $conn->close();
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Admin Functions</span>
+                            <span>Theater Management</span>
                         </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
@@ -288,52 +301,65 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="users.php">
-                                <i class="fas fa-users"></i>
-                                Users
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
-                                <i class="fas fa-cog"></i>
-                                Settings
-                            </a>
-                        </li>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Theater Management</span>
-                        </h6>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/theaters.php">
+                            <a class="nav-link" href="theaters.php">
                                 <i class="fas fa-building"></i>
                                 Theaters
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/locations.php">
+                            <a class="nav-link" href="locations.php">
                                 <i class="fas fa-map-marker-alt"></i>
                                 Locations
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/schedules.php">
+                            <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/bookings.php">
+                            <a class="nav-link" href="bookings.php">
                                 <i class="fas fa-ticket-alt"></i>
                                 Bookings
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link active" href="reports.php">
+                            <a class="nav-link active" href="reports.php"> <!-- This is the reports page itself for TM -->
                                 <i class="fas fa-chart-bar"></i>
                                 Reports
                             </a>
                         </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Content Management</span>
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php"> <!-- Super Admin's comprehensive reports -->
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
                         </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="../content_manager/movies.php">
@@ -341,6 +367,7 @@ $conn->close();
                                 Movies
                             </a>
                         </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -349,7 +376,7 @@ $conn->close();
                 <div class="admin-header">
                     <h1>Reports & Analytics</h1>
                     <div class="admin-user-info">
-                        <img src="https://via.placeholder.com/40" alt="Admin">
+                        <img src="https://placehold.co/40x40/cccccc/333333?text=Admin" alt="Admin">
                         <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
@@ -390,7 +417,7 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php while ($movie = $revenueByMovie->fetch_assoc()): ?>
+                                <?php while ($movie = $revenueByMovieResult->fetch_assoc()): ?>
                                     <tr>
                                         <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
                                         <td><?php echo htmlspecialchars($movie['bookingCount']); ?></td>
@@ -426,7 +453,7 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php while ($theater = $revenueByTheater->fetch_assoc()): ?>
+                                        <?php while ($theater = $revenueByTheaterResult->fetch_assoc()): ?>
                                             <tr>
                                                 <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))); ?></td>
                                                 <td><?php echo htmlspecialchars($theater['bookingCount']); ?></td>
@@ -453,7 +480,7 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php while ($time = $popularTimes->fetch_assoc()): ?>
+                                        <?php while ($time = $popularTimesResult->fetch_assoc()): ?>
                                             <tr>
                                                 <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showTime']))); ?></td>
                                                 <td><?php echo htmlspecialchars($time['bookingCount']); ?></td>
@@ -473,29 +500,25 @@ $conn->close();
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
+        // Data passed from PHP to JavaScript
+        const revenueByMovieLabels = <?php echo json_encode($revenueByMovieLabels); ?>;
+        const revenueByMovieData = <?php echo json_encode($revenueByMovieData); ?>;
+        const revenueByDateLabels = <?php echo json_encode($revenueByDateLabels); ?>;
+        const revenueByDateData = <?php echo json_encode($revenueByDateData); ?>;
+        const revenueByTheaterLabels = <?php echo json_encode($revenueByTheaterLabels); ?>;
+        const revenueByTheaterData = <?php echo json_encode($revenueByTheaterData); ?>;
+        const popularTimesLabels = <?php echo json_encode($popularTimesLabels); ?>;
+        const popularTimesData = <?php echo json_encode($popularTimesData); ?>;
+
         // Revenue by Movie Chart
         const revenueByMovieCtx = document.getElementById('revenueByMovieChart').getContext('2d');
         const revenueByMovieChart = new Chart(revenueByMovieCtx, {
             type: 'bar',
             data: {
-                labels: [
-                    <?php
-                    $revenueByMovie->data_seek(0);
-                    while ($movie = $revenueByMovie->fetch_assoc()) {
-                        echo "'" . addslashes($movie['movieTitle']) . "', ";
-                    }
-                    ?>
-                ],
+                labels: revenueByMovieLabels,
                 datasets: [{
                     label: 'Revenue (₹)',
-                    data: [
-                        <?php
-                        $revenueByMovie->data_seek(0);
-                        while ($movie = $revenueByMovie->fetch_assoc()) {
-                            echo $movie['totalRevenue'] . ", ";
-                        }
-                        ?>
-                    ],
+                    data: revenueByMovieData,
                     backgroundColor: 'rgba(54, 162, 235, 0.5)',
                     borderColor: 'rgba(54, 162, 235, 1)',
                     borderWidth: 1
@@ -526,24 +549,10 @@ $conn->close();
         const revenueByDateChart = new Chart(revenueByDateCtx, {
             type: 'line',
             data: {
-                labels: [
-                    <?php
-                    $revenueByDate->data_seek(0);
-                    while ($date = $revenueByDate->fetch_assoc()) {
-                        echo "'" . addslashes($date['showDateFormatted']) . "', ";
-                    }
-                    ?>
-                ],
+                labels: revenueByDateLabels,
                 datasets: [{
                     label: 'Daily Revenue (₹)',
-                    data: [
-                        <?php
-                        $revenueByDate->data_seek(0);
-                        while ($date = $revenueByDate->fetch_assoc()) {
-                            echo $date['dailyRevenue'] . ", ";
-                        }
-                        ?>
-                    ],
+                    data: revenueByDateData,
                     backgroundColor: 'rgba(75, 192, 192, 0.2)',
                     borderColor: 'rgba(75, 192, 192, 1)',
                     borderWidth: 2,
@@ -575,23 +584,9 @@ $conn->close();
         const revenueByTheaterChart = new Chart(revenueByTheaterCtx, {
             type: 'pie',
             data: {
-                labels: [
-                    <?php
-                    $revenueByTheater->data_seek(0);
-                    while ($theater = $revenueByTheater->fetch_assoc()) {
-                        echo "'" . addslashes(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))) . "', ";
-                    }
-                    ?>
-                ],
+                labels: revenueByTheaterLabels,
                 datasets: [{
-                    data: [
-                        <?php
-                        $revenueByTheater->data_seek(0);
-                        while ($theater = $revenueByTheater->fetch_assoc()) {
-                            echo $theater['totalRevenue'] . ", ";
-                        }
-                        ?>
-                    ],
+                    data: revenueByTheaterData,
                     backgroundColor: [
                         'rgba(255, 99, 132, 0.5)',
                         'rgba(54, 162, 235, 0.5)',
@@ -640,24 +635,10 @@ $conn->close();
         const popularTimesChart = new Chart(popularTimesCtx, {
             type: 'bar',
             data: {
-                labels: [
-                    <?php
-                    $popularTimes->data_seek(0);
-                    while ($time = $popularTimes->fetch_assoc()) {
-                        echo "'" . addslashes(date('h:i A', strtotime($time['showTime']))) . "', ";
-                    }
-                    ?>
-                ],
+                labels: popularTimesLabels,
                 datasets: [{
                     label: 'Number of Bookings',
-                    data: [
-                        <?php
-                        $popularTimes->data_seek(0);
-                        while ($time = $popularTimes->fetch_assoc()) {
-                            echo $time['bookingCount'] . ", ";
-                        }
-                        ?>
-                    ],
+                    data: popularTimesData,
                     backgroundColor: 'rgba(153, 102, 255, 0.5)',
                     borderColor: 'rgba(153, 102, 255, 1)',
                     borderWidth: 1

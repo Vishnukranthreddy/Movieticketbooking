@@ -60,9 +60,9 @@ CREATE TABLE IF NOT EXISTS `admin_users` (
 --
 -- Default password 'admin123' hashed with PASSWORD_DEFAULT or similar for $2y$10$
 INSERT INTO `admin_users` (`username`, `password`, `email`, `fullName`, `roleID`, `status`) VALUES
-('admin', '$2y$10$Zyw3AvNSq5hEu.b.bH136uI64VHcKfXOq9YHd6EDIb8RxzicTQLH2', 'admin@example.com', 'Super Admin', 1, 'active');
-('tadmin', '$2y$10$Zyw3AvNSq5hEu.b.bH136uI64VHcKfXOq9YHd6EDIb8RxzicTQLH2', 'tadmin@example.com', 'Theater Manager', 2, 'active');
-('cadmin', '$2y$10$Zyw3AvNSq5hEu.b.bH136uI64VHcKfXOq9YHd6EDIb8RxzicTQLH2', 'cadmin@example.com', 'Content Manager', 3, 'active')
+('admin', '$2y$10$Zyw3AvNSq5hEu.b.bH136uI64VHcKfXOq9YHd6EDIb8RxzicTQLH2', 'admin@example.com', 'Super Admin', 1, 'active'),
+('tadmin', '$2y$10$Zyw3AvNSq5hEu.b.bH136uI64VHcKfXOq9YHd6EDIb8RxzicTQLH2', 'tadmin@example.com', 'Theater Manager', 2, 'active'),
+('cadmin', '$2y$10$Zyw3AvNSq5hEu.b.bH136uI64VHcKfXOq9YHd6EDIb8RxzicTQLH2', 'cadmin@example.com', 'Content Manager', 3, 'active');
 
 -- --------------------------------------------------------
 

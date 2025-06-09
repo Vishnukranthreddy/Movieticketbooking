@@ -18,7 +18,7 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Pagination
+// Pagination parameters
 $limit = 10;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $start = ($page - 1) * $limit;
@@ -36,6 +36,37 @@ if (!empty($search)) {
     $types = "sss";
 }
 
+// --- Function to fetch users with pagination and search ---
+// This function will be called initially and again after adding a user
+function fetchUsers($conn, $searchCondition, $params, $types, $start, $limit) {
+    $usersQuery = "
+        SELECT id, username, name, phone FROM users
+        $searchCondition
+        ORDER BY id DESC
+        LIMIT ?, ?
+    ";
+    $stmtUsers = $conn->prepare($usersQuery);
+
+    $query_params = $params;
+    $query_types = $types;
+
+    $query_params[] = $start;
+    $query_params[] = $limit;
+    $query_types .= "ii";
+
+    if (!empty($searchCondition)) {
+        // Use call_user_func_array for binding a variable number of parameters
+        $stmtUsers->bind_param($query_types, ...$query_params);
+    } else {
+        $stmtUsers->bind_param("ii", $start, $limit);
+    }
+    
+    $stmtUsers->execute();
+    $result = $stmtUsers->get_result();
+    $stmtUsers->close(); // Close the statement after getting result
+    return $result;
+}
+
 // Get total users count
 $totalQuery = "SELECT COUNT(*) as total FROM users $searchCondition";
 $stmtCount = $conn->prepare($totalQuery);
@@ -49,30 +80,9 @@ $total = $totalRow['total'];
 $pages = ceil($total / $limit);
 $stmtCount->close();
 
-// Get users with pagination
-$usersQuery = "
-    SELECT id, username, name, phone FROM users
-    $searchCondition
-    ORDER BY id DESC
-    LIMIT ?, ?
-";
-$stmtUsers = $conn->prepare($usersQuery);
-// Rebind parameters for the main query
-$query_params = $params; // Copy search parameters
-$query_types = $types; // Copy search types
+// --- Initial fetch of users ---
+$users = fetchUsers($conn, $searchCondition, $params, $types, $start, $limit);
 
-$query_params[] = $start;
-$query_params[] = $limit;
-$query_types .= "ii";
-
-if (!empty($searchCondition)) {
-    $stmtUsers->bind_param($query_types, ...$query_params);
-} else {
-    $stmtUsers->bind_param("ii", $start, $limit);
-}
-$stmtUsers->execute();
-$users = $stmtUsers->get_result();
-$stmtUsers->close();
 
 // Process form submission for adding a new user
 $message = '';
@@ -102,16 +112,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
         if ($insertQuery->execute()) {
             $message = 'User added successfully!';
             $messageType = 'success';
-            // No redirect here, display message on same page
+            // Refresh user list by calling fetchUsers function again
+            // We need to re-evaluate pagination context if records change,
+            // but for simplicity, we'll just re-fetch the current page.
+            $users = fetchUsers($conn, $searchCondition, $params, $types, $start, $limit);
+
         } else {
             $message = 'Error adding user: ' . $conn->error;
             $messageType = 'danger';
         }
         $insertQuery->close();
     }
-    // Refresh current user list after add operation
-    $users = $conn->query($usersQuery)->get_result();
-    $users->data_seek(0); // Reset pointer
 }
 
 // Check for messages from GET parameters (e.g., from delete_user.php)
@@ -278,7 +289,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="logout.php">Sign out</a>
+                <a class="nav-link" href="logout.php">Sign out</a>
             </li>
         </ul>
     </nav>

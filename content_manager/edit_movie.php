@@ -93,7 +93,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
         // Only proceed with database update if no image upload error occurred
         if (empty($errorMessage) || strpos($errorMessage, "Image upload failed") === false) {
             $updateStmt = $conn->prepare("UPDATE movietable SET movieImg = ?, movieTitle = ?, movieGenre = ?, movieDuration = ?, movieRelDate = ?, movieDirector = ?, movieActors = ?, locationID = ?, mainhall = ?, viphall = ?, privatehall = ? WHERE movieID = ?");
-            $updateStmt->bind_param("sssssssiisii", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId);
+            $updateStmt->bind_param("sssssssiiddi", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId);
 
             if ($updateStmt->execute()) {
                 $successMessage = "Movie updated successfully!";

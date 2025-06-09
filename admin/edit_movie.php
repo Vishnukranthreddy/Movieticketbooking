@@ -51,16 +51,10 @@ if ($movieId > 0) {
 }
 
 // Get all locations for dropdown
-$locationsResult = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
+$locations = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
 // Check if query was successful
-if ($locationsResult === false) {
+if ($locations === false) {
     $errorMessage .= ($errorMessage ? "<br>" : "") . "Error fetching locations: " . $conn->error;
-    $locations = []; // Provide an empty array to prevent issues in the loop
-} else {
-    $locations = [];
-    while ($row = $locationsResult->fetch_assoc()) {
-        $locations[] = $row;
-    }
 }
 
 // Process form submission for update
@@ -125,7 +119,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
         if ($uploadOk !== 0) { 
             $updateStmt = $conn->prepare("UPDATE movietable SET movieImg = ?, movieTitle = ?, movieGenre = ?, movieDuration = ?, movieRelDate = ?, movieDirector = ?, movieActors = ?, locationID = ?, mainhall = ?, viphall = ?, privatehall = ? WHERE movieID = ?");
             // Use 's' for strings, 'i' for integers, 'd' for double/decimal for price fields
-            $updateStmt->bind_param("sssssssiisii", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId);
+            $updateStmt->bind_param("sssssssiiddi", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId);
 
             if ($updateStmt->execute()) {
                 $successMessage = "Movie updated successfully!";
@@ -408,18 +402,13 @@ $conn->close();
                                             <option value="">Select Location (Optional)</option>
                                             <?php
                                             // Reset pointer for locations query
-                                            // if ($locations->num_rows > 0) { // This check should be against the query result itself, not num_rows if locations might be empty
-                                            //     $locations->data_seek(0);
-                                            // }
-                                            if (is_array($locations) || (is_object($locations) && $locations->num_rows > 0)) {
-                                                // If $locations is an array (from error handling above) or a valid result set
-                                                foreach ($locations as $location) {
-                                            ?>
-                                                <option value="<?php echo htmlspecialchars($location['locationID']); ?>" <?php echo ($movie['locationID'] == $location['locationID']) ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($location['locationName']); ?>
-                                                </option>
-                                            <?php
-                                                }
+                                            if ($locations && $locations->num_rows > 0) {
+                                                $locations->data_seek(0);
+                                                while ($location = $locations->fetch_assoc()): ?>
+                                                    <option value="<?php echo htmlspecialchars($location['locationID']); ?>" <?php echo ($movie['locationID'] == $location['locationID']) ? 'selected' : ''; ?>>
+                                                        <?php echo htmlspecialchars($location['locationName']); ?>
+                                                    </option>
+                                                <?php endwhile;
                                             }
                                             ?>
                                         </select>

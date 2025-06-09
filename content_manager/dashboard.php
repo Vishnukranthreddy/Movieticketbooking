@@ -25,7 +25,7 @@ $activeMovieCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules 
 
 // Get recent movies added/updated
 $recentMoviesQuery = "
-    SELECT m.movieID, m.movieTitle, m.movieGenre, m.movieDuration, m.movieImg, l.locationName
+    SELECT m.movieID, m.movieTitle, m.movieGenre, m.movieDuration, m.movieImg, m.movieRelDate, l.locationName
     FROM movietable m
     LEFT JOIN locations l ON m.locationID = l.locationID
     ORDER BY m.movieID DESC LIMIT 5
@@ -43,7 +43,7 @@ $conn->close();
     <title>Content Dashboard - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -207,7 +207,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="../admin/logout.php">Sign out</a>
+                <a class="btn btn-signout" href="../admin/logout.php">Sign out</a> <!-- Adjusted path -->
             </li>
         </ul>
     </nav>
@@ -254,6 +254,12 @@ $conn->close();
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php"> <!-- Super Admin's comprehensive reports -->
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
                             <span>Theater Management (Super Admin)</span>
                         </h6>
@@ -284,7 +290,7 @@ $conn->close();
                         <li class="nav-item">
                             <a class="nav-link" href="../theater_manager/reports.php">
                                 <i class="fas fa-chart-bar"></i>
-                                Reports
+                                Theater Reports
                             </a>
                         </li>
                         <?php endif; ?>
@@ -296,7 +302,7 @@ $conn->close();
                 <div class="admin-header">
                     <h1>Content Manager Dashboard</h1>
                     <div class="admin-user-info">
-                        <img src="https://via.placeholder.com/40" alt="Admin">
+                        <img src="https://placehold.co/40x40/cccccc/333333?text=Admin" alt="Admin">
                         <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
@@ -345,12 +351,12 @@ $conn->close();
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                                     <td>
-                                                        <img src="<?php echo '../../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image-mini">
+                                                        <img src="../../<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image-mini">
                                                     </td>
                                                     <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
                                                     <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
                                                     <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
-                                                    <td><?php echo htmlspecialchars($movie['movieRelDate']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieRelDate'] ?? 'N/A'); ?></td> <!-- Added N/A check here -->
                                                     <td><?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></td>
                                                 </tr>
                                             <?php endwhile; ?>

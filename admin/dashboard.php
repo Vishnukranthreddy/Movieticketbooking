@@ -266,25 +266,25 @@ $conn->close();
                             <span>Theater Management</span>
                         </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/theaters.php">
+                            <a class="nav-link" href="theaters.php">
                                 <i class="fas fa-building"></i>
                                 Theaters
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/locations.php">
+                            <a class="nav-link" href="locations.php">
                                 <i class="fas fa-map-marker-alt"></i>
                                 Locations
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/schedules.php">
+                            <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/bookings.php">
+                            <a class="nav-link" href="bookings.php">
                                 <i class="fas fa-ticket-alt"></i>
                                 Bookings
                             </a>
@@ -299,7 +299,7 @@ $conn->close();
                             <span>Content Management</span>
                         </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="../content_manager/movies.php">
+                            <a class="nav-link" href="movies.php">
                                 <i class="fas fa-film"></i>
                                 Movies
                             </a>

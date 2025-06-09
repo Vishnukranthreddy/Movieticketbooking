@@ -1,9 +1,18 @@
 <?php
 session_start();
 
-// Check if already logged in, redirect to dashboard
+// Check if already logged in, redirect to appropriate dashboard
 if (isset($_SESSION['admin_id'])) {
-    header("Location: dashboard.php");
+    if ($_SESSION['admin_role'] == 1) { // Super Admin
+        header("Location: dashboard.php");
+    } elseif ($_SESSION['admin_role'] == 2) { // Theater Manager
+        header("Location: ../theater_manager/dashboard.php");
+    } elseif ($_SESSION['admin_role'] == 3) { // Content Manager
+        header("Location: ../content_manager/dashboard.php");
+    } else {
+        // Fallback for unknown role, or show a generic error/unauthorized page
+        header("Location: unauthorized.php"); // You might create this page
+    }
     exit();
 }
 
@@ -47,9 +56,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $updateQuery->execute();
             $updateQuery->close();
 
-            // Redirect to dashboard
-            $_SESSION['just_logged_in'] = true;
-            header("Location: dashboard.php");
+            // Redirect based on role
+            $_SESSION['just_logged_in'] = true; // Use this for welcome messages if needed
+            if ($_SESSION['admin_role'] == 1) { // Super Admin
+                header("Location: dashboard.php");
+            } elseif ($_SESSION['admin_role'] == 2) { // Theater Manager
+                header("Location: ../theater_manager/dashboard.php");
+            } elseif ($_SESSION['admin_role'] == 3) { // Content Manager
+                header("Location: ../content_manager/dashboard.php");
+            } else {
+                // Fallback for unknown role
+                $error = "Access denied for this role.";
+                session_destroy(); // Destroy session for unknown roles
+            }
             exit();
         } else {
             $error = "Invalid username or password.";

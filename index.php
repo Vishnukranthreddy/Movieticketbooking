@@ -22,10 +22,34 @@ $featuredMoviesQuery = "
 ";
 $featuredMovies = $conn->query($featuredMoviesQuery);
 
+// Check if the movie query failed
+if ($featuredMovies === false) {
+    die("Featured Movies Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($featuredMoviesQuery));
+}
+
 // Get total movies count
 $totalMoviesQuery = "SELECT COUNT(*) as total FROM movietable";
 $totalMoviesResult = $conn->query($totalMoviesQuery);
 $totalMovies = $totalMoviesResult->fetch_assoc()['total'];
+
+// Query for "Our Theaters" section
+// Fetch all active theaters, including their panorama image path
+$theatersQuery = "
+    SELECT
+        theaterID,
+        theaterName,
+        theaterCity,
+        theaterPanoramaImg
+    FROM theaters
+    WHERE theaterStatus = 'active'
+    ORDER BY theaterName ASC
+";
+$theaters = $conn->query($theatersQuery);
+
+// Check if the theater query failed
+if ($theaters === false) {
+    die("Theater Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($theatersQuery));
+}
 
 $conn->close();
 ?>
@@ -94,6 +118,10 @@ $conn->close();
             transform: translateY(-2px);
             box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
         }
+        .btn-primary.block {
+            display: block;
+            text-align: center;
+        }
         .btn-secondary {
             background-color: transparent;
             color: #e94560;
@@ -140,6 +168,45 @@ $conn->close();
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
         }
+        
+        .theater-card {
+            background-color: #0f3460;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+        .theater-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+        }
+        .theater-card-image {
+            width: 100%;
+            height: 200px; /* Adjust height for theater preview */
+            object-fit: cover;
+            border-bottom: 3px solid #e94560;
+        }
+        .btn-secondary-custom { /* Custom class for secondary button style */
+            background-color: #3f5f8a; /* A complementary blue */
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: background-color 0.3s ease;
+            text-align: center;
+        }
+        .btn-secondary-custom:hover {
+            background-color: #304a6c;
+        }
+        .card-buttons {
+            padding: 1.5rem; /* Padding matches card-body */
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem; /* Space between buttons */
+            margin-top: auto; /* Push buttons to the bottom */
+        }
     </style>
 </head>
 <body class="antialiased">
@@ -151,8 +218,15 @@ $conn->close();
                 <ul class="flex space-x-6">
                     <li><a href="index.php" class="nav-link text-white hover:text-red-500">Home</a></li>
                     <li><a href="user/index.php" class="nav-link text-white hover:text-red-500">Movies</a></li>
-                    <li><a href="user/login.php" class="nav-link text-white hover:text-red-500">Login</a></li>
-                    <li><a href="user/register.php" class="nav-link text-white hover:text-red-500">Register</a></li>
+                    <li><a href="user/schedule.php" class="nav-link text-white hover:text-red-500">Schedule</a></li>
+                    <li><a href="user/contact-us.php" class="nav-link text-white hover:text-red-500">Contact Us</a></li>
+                    <?php if (isset($_SESSION['user_id'])): ?>
+                        <li><a href="user/profile.php" class="nav-link text-white hover:text-red-500">Profile</a></li>
+                        <li><a href="user/logout.php" class="nav-link text-white hover:text-red-500">Logout</a></li>
+                    <?php else: ?>
+                        <li><a href="user/login.php" class="nav-link text-white hover:text-red-500">Login</a></li>
+                        <li><a href="user/register.php" class="nav-link text-white hover:text-red-500">Register</a></li>
+                    <?php endif; ?>
                     <li><a href="admin/index.php" class="nav-link text-white hover:text-red-500">Admin</a></li>
                 </ul>
             </nav>
@@ -226,7 +300,7 @@ $conn->close();
             <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
                 <?php while ($movie = $featuredMovies->fetch_assoc()): ?>
                     <div class="card">
-                        <img src="<?php echo htmlspecialchars($movie['movieImg']); ?>" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="card-image">
+                        <img src="<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="card-image">
                         <div class="p-6">
                             <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($movie['movieTitle']); ?></h3>
                             <p class="text-sm text-gray-400 mb-1"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['movieGenre']); ?></p>
@@ -238,6 +312,33 @@ $conn->close();
             </div>
             <div class="text-center mt-12">
                 <a href="user/index.php" class="btn-secondary">View All Movies</a>
+            </div>
+        </div>
+    </section>
+    <?php endif; ?>
+
+    <!-- Our Theaters Section -->
+    <?php if ($theaters->num_rows > 0): ?>
+    <section class="py-16">
+        <div class="container mx-auto px-4">
+            <h2 class="text-3xl font-bold text-center text-white mb-12">Our Theaters</h2>
+            <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+                <?php while ($theater = $theaters->fetch_assoc()): ?>
+                    <div class="theater-card">
+                        <img src="<?php echo htmlspecialchars($theater['theaterPanoramaImg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theaterName']); ?>" class="theater-card-image">
+                        <div class="p-6">
+                            <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($theater['theaterName']); ?></h3>
+                            <p class="text-sm text-gray-400 mb-4"><strong>City:</strong> <?php echo htmlspecialchars($theater['theaterCity'] ?? 'N/A'); ?></p>
+                        </div>
+                        <div class="card-buttons">
+                            <?php if (!empty($theater['theaterPanoramaImg'])): ?>
+                                <a href="user/view_theater.php?theater_id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn-primary">View Theater</a>
+                            <?php else: ?>
+                                <span class="btn-secondary-custom opacity-50 cursor-not-allowed">No Panorama</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endwhile; ?>
             </div>
         </div>
     </section>

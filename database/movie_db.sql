@@ -72,8 +72,8 @@ INSERT INTO `admin_users` (`username`, `password`, `email`, `fullName`, `roleID`
 CREATE TABLE IF NOT EXISTS `bookingtable` (
   `bookingID` int(11) NOT NULL AUTO_INCREMENT,
   `movieID` int(11) DEFAULT NULL,
-  `scheduleID` int(11) DEFAULT NULL, -- Added from admin_updates.sql
-  `hallID` int(11) DEFAULT NULL,     -- Added from admin_updates.sql
+  `scheduleID` int(11) DEFAULT NULL, 
+  `hallID` int(11) DEFAULT NULL,     
   `bookingTheatre` varchar(100) NOT NULL,
   `bookingType` varchar(100) DEFAULT NULL,
   `bookingDate` varchar(50) NOT NULL,
@@ -174,12 +174,13 @@ CREATE TABLE IF NOT EXISTS `movietable` (
 -- Dumping data for table `movietable`
 --
 INSERT INTO `movietable` (`movieID`, `movieImg`, `movieTitle`, `movieGenre`, `movieDuration`, `movieRelDate`, `movieDirector`, `movieActors`, `mainhall`, `viphall`, `privatehall`, `locationID`) VALUES
-(1, 'img\\japan.jpg', 'japan', ' Action, Adventure, Sci-Fi ', 220, '2018-10-18', 'Anna Boden, Ryan Fleck', 'Brie Larson, Samuel L. Jackson, Ben Mendelsohn', 0, 0, 0, NULL),
-(2, 'img/movie-poster-2.jpg', 'Qarmat Bitamrmat  ', 'Comedy', 110, '2018-10-18', 'Assad Fouladkar', 'Ahmed Adam, Bayyumy Fouad, Salah Abdullah , Entsar, Dina Fouad ', 0, 0, 0, NULL),
-(3, 'img/movie-poster-3.jpg', 'The Lego Movie', 'Animation, Action, Adventure', 110, '2014-02-07', 'Phil Lord, Christopher Miller', 'Chris Pratt, Will Ferrell, Elizabeth Banks', 0, 0, 0, NULL),
-(4, 'img/movie-poster-4.jpg', 'Nadi Elregal Elserri ', 'Comedy', 105, '2019-01-23', ' Ayman Uttar', 'Karim Abdul Aziz, Ghada Adel, Maged El Kedwany, Nesreen Tafesh, Bayyumy Fouad, Moataz El Tony ', 0, 0, 0, NULL),
-(5, 'img/movie-poster-5.jpg', 'VICE', 'Biography, Comedy, Drama', 132, '2018-12-25', 'Adam McKay', 'Christian Bale, Amy Adams, Steve Carell', 0, 0, 0, NULL),
-(6, 'img/movie-poster-6.jpg', 'The Vanishing', 'Crime, Mystery, Thriller', 107, '2019-01-04', 'Kristoffer Nyholm', 'Gerard Butler, Peter Mullan, Connor Swindells', 0, 0, 0, NULL);
+
+(1, 'img/tollywood_posters/rrr.jpg', 'RRR', 'Action, Drama, Historical', 187, '2022-03-25', 'S. S. Rajamouli', 'N. T. Rama Rao Jr., Ram Charan, Alia Bhatt, Ajay Devgn', 0, 0, 0, NULL),
+(2, 'img/tollywood_posters/baahubali2.jpg', 'Baahubali 2: The Conclusion', 'Action, Fantasy, War', 167, '2017-04-28', 'S. S. Rajamouli', 'Prabhas, Rana Daggubati, Anushka Shetty, Tamannaah', 0, 0, 0, NULL),
+(3, 'img/tollywood_posters/pushpa.jpg', 'Pushpa: The Rise', 'Action, Crime, Drama', 179, '2021-12-17', 'Sukumar', 'Allu Arjun, Fahadh Faasil, Rashmika Mandanna', 0, 0, 0, NULL),
+(4, 'img/tollywood_posters/sarkaruvaari.jpg', 'Sarkaru Vaari Paata', 'Action, Comedy, Romance', 159, '2022-05-12', 'Parasuram', 'Mahesh Babu, Keerthy Suresh', 0, 0, 0, NULL),
+(5, 'img/tollywood_posters/rangasthalam.jpg', 'Rangasthalam', 'Action, Drama', 170, '2018-03-30', 'Sukumar', 'Ram Charan, Samantha Ruth Prabhu, Aadhi Pinisetty', 0, 0, 0, NULL),
+(6, 'img/tollywood_posters/arjunreddy.jpg', 'Arjun Reddy', 'Romance, Drama', 186, '2017-08-25', 'Sandeep Reddy Vanga', 'Vijay Deverakonda, Shalini Pandey', 0, 0, 0, NULL);
 
 -- --------------------------------------------------------
 
@@ -286,18 +287,7 @@ CREATE TABLE IF NOT EXISTS `theater_halls` (
   KEY `theaterID` (`theaterID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
---
--- Dumping data for table `theater_halls`
---
-INSERT INTO `theater_halls` (`theaterID`, `hallName`, `hallType`, `totalSeats`) VALUES
-(1, 'Hall 1', 'main-hall', 120),
-(1, 'Hall 2', 'vip-hall', 80),
-(1, 'Hall 3', 'private-hall', 40),
-(2, 'Hall 1', 'main-hall', 150),
-(2, 'Hall 2', 'vip-hall', 100),
-(3, 'Hall 1', 'main-hall', 200);
 
--- --------------------------------------------------------
 
 --
 -- Table structure for table `users`
@@ -370,5 +360,30 @@ ADD CONSTRAINT `fk_theaters_locationID` FOREIGN KEY (`locationID`) REFERENCES `l
 
 
 ALTER TABLE `theater_halls` ADD `hallPanoramaImg` VARCHAR(255) NULL AFTER `totalSeats`;
+
+--
+-- Dumping data for table `theater_halls`
+--
+INSERT INTO `theater_halls` (`theaterID`, `hallName`, `hallType`, `totalSeats`, `hallPanoramaImg`) VALUES
+(1, 'Hall 1', 'main-hall', 120, 'img/panoramas/6846c1e1f2a40_360_F_526.jpg'),
+(2, 'Hall 2', 'vip-hall', 100, 'img/panoramas/6846c54edbb76_an.jpg'),
+(3, 'Hall 1', 'main-hall', 200, 'img/panoramas/abc.jpg');
+
+-- --------------------------------------------------------
+
+-- Update PVR Cinemas with a panorama image
+UPDATE `theaters`
+SET `theaterPanoramaImg` = 'img/panoramas/pvr_lobby.jpg' -- Replace with your actual image path
+WHERE `theaterID` = 1; -- Assuming PVR Cinemas is theaterID 1
+
+-- Update INOX Movies
+UPDATE `theaters`
+SET `theaterPanoramaImg` = 'img/panoramas/inox_entrance.jpg' -- Replace with your actual image path
+WHERE `theaterID` = 2; -- Assuming INOX Movies is theaterID 2
+
+-- Update Cinepolis
+UPDATE `theaters`
+SET `theaterPanoramaImg` = 'img/panoramas/cinepolis_exterior.jpg' -- Replace with your actual image path
+WHERE `theaterID` = 3; -- Assuming Cinepolis is theaterID 3
 
 COMMIT;

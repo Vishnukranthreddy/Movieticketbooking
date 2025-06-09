@@ -1,15 +1,9 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: ../index.php");
-    exit();
-}
-
-// Ensure user has Theater Manager role (roleID = 2)
-if ($_SESSION['admin_role'] != 2) {
-    header("Location: ../dashboard.php"); // Redirect to main admin dashboard or access denied page
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -17,16 +11,16 @@ if ($_SESSION['admin_role'] != 2) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-$errorMessage = '';
-
 // Process form submission
+$errorMessage = '';
+$successMessage = '';
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Get form data
     $theaterName = $_POST['theaterName'];
@@ -38,42 +32,44 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $theaterEmail = $_POST['theaterEmail'];
     $theaterStatus = $_POST['theaterStatus'];
     
-    // Insert theater data
+    // Insert theater data using prepared statement
     $stmt = $conn->prepare("INSERT INTO theaters (theaterName, theaterAddress, theaterCity, theaterState, theaterZipcode, theaterPhone, theaterEmail, theaterStatus) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->bind_param("ssssssss", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus);
     
     if ($stmt->execute()) {
-        $theaterId = $conn->insert_id;
+        $theaterId = $conn->insert_id; // Get the ID of the newly inserted theater
         
         // Check if we need to create default halls
         if (isset($_POST['createDefaultHalls']) && $_POST['createDefaultHalls'] == 'yes') {
-            $hallStatus = "active"; // Default status for new halls
-            
-            // Create main hall
+            // Prepared statement for hall insertion
+            $hallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
+            $hallStatus = "active";
+
+            // Create Main Hall
             $hallName = "Main Hall";
             $hallType = "main-hall";
             $totalSeats = 120;
-            $stmtHall = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
-            $stmtHall->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-            $stmtHall->execute();
+            $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+            $hallStmt->execute();
             
-            // Create VIP hall
+            // Create VIP Hall
             $hallName = "VIP Hall";
             $hallType = "vip-hall";
             $totalSeats = 80;
-            $stmtHall->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-            $stmtHall->execute();
+            $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+            $hallStmt->execute();
             
-            // Create private hall
+            // Create Private Hall
             $hallName = "Private Hall";
             $hallType = "private-hall";
             $totalSeats = 40;
-            $stmtHall->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-            $stmtHall->execute();
+            $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+            $hallStmt->execute();
 
-            $stmtHall->close();
+            $hallStmt->close(); // Close the hall insertion statement
         }
         
+        $successMessage = "Theater added successfully!";
         // Redirect to theaters page after successful addition
         header("Location: theaters.php?success=1");
         exit();
@@ -95,7 +91,7 @@ $conn->close();
     <title>Add New Theater - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Path adjusted -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -182,10 +178,10 @@ $conn->close();
 </head>
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Theater Manager</a>
+        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -195,6 +191,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -208,11 +207,61 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>

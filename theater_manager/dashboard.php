@@ -1,15 +1,9 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: ../index.php"); // Redirect to main admin login
-    exit();
-}
-
-// Ensure user has Theater Manager role (roleID = 2)
-if ($_SESSION['admin_role'] != 2) {
-    header("Location: ../dashboard.php"); // Redirect to main admin dashboard or access denied page
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -17,34 +11,45 @@ if ($_SESSION['admin_role'] != 2) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Get counts for dashboard relevant to Theater Manager
+// Get counts relevant to Theater Manager
 $theaterCount = $conn->query("SELECT COUNT(*) as count FROM theaters")->fetch_assoc()['count'];
-$activeSchedulesCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules WHERE scheduleStatus = 'active'")->fetch_assoc()['count'];
-$upcomingMoviesCount = $conn->query("SELECT COUNT(*) as count FROM movietable WHERE movieRelDate >= CURDATE()")->fetch_assoc()['count'];
+$scheduleCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules")->fetch_assoc()['count'];
+$bookingCount = $conn->query("SELECT COUNT(*) as count FROM bookingtable")->fetch_assoc()['count'];
+$movieCount = $conn->query("SELECT COUNT(*) as count FROM movietable")->fetch_assoc()['count']; // Also show total movies
+
 
 // Get recent schedules
-$recentSchedules = $conn->query("
-    SELECT ms.*, m.movieTitle, h.hallName, t.theaterName
+$recentSchedulesQuery = "
+    SELECT ms.scheduleID, ms.showDate, ms.showTime, ms.price,
+           m.movieTitle, m.movieImg,
+           h.hallName, t.theaterName
     FROM movie_schedules ms
     JOIN movietable m ON ms.movieID = m.movieID
     JOIN theater_halls h ON ms.hallID = h.hallID
     JOIN theaters t ON h.theaterID = t.theaterID
-    WHERE ms.showDate >= CURDATE()
-    ORDER BY ms.showDate ASC, ms.showTime ASC LIMIT 5
-");
+    ORDER BY ms.showDate DESC, ms.showTime DESC LIMIT 5
+";
+$recentSchedules = $conn->query($recentSchedulesQuery);
 
-// Get recent theaters added
-$recentTheaters = $conn->query("
-    SELECT * FROM theaters
-    ORDER BY theaterID DESC LIMIT 5
-");
+// Get recent bookings
+$recentBookingsQuery = "
+    SELECT b.bookingID, b.bookingFName, b.bookingLName, b.amount,
+           m.movieTitle,
+           ms.showDate, ms.showTime
+    FROM bookingtable b
+    LEFT JOIN movietable m ON b.movieID = m.movieID
+    LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    ORDER BY b.bookingID DESC LIMIT 5
+";
+$recentBookings = $conn->query($recentBookingsQuery);
+
 
 $conn->close();
 ?>
@@ -54,10 +59,10 @@ $conn->close();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Theater Manager Dashboard - Showtime Select Admin</title>
+    <title>Theater Dashboard - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Path adjusted for theater_manager folder -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -127,7 +132,7 @@ $conn->close();
             margin-left: 240px;
             padding: 20px;
         }
-        .summary-card {
+        .dashboard-card {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -135,21 +140,17 @@ $conn->close();
             text-align: center;
             margin-bottom: 20px;
         }
-        .summary-card h4 {
+        .dashboard-card h4 {
             font-size: 1.2rem;
             color: #6c757d;
-            margin-bottom: 10px;
         }
-        .summary-card .count {
+        .dashboard-card p {
             font-size: 2.5rem;
             font-weight: bold;
-            color: #007bff;
+            margin-top: 10px;
+            color: #343a40;
         }
-        .summary-card.theaters .count { color: #6f42c1; }
-        .summary-card.schedules .count { color: #fd7e14; }
-        .summary-card.movies .count { color: #28a745; }
-
-        .dashboard-section {
+        .recent-table-container {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -160,10 +161,7 @@ $conn->close();
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-        }
-        .table-responsive {
-            margin-top: 15px;
+            margin-bottom: 30px;
         }
         .admin-user-info {
             display: flex;
@@ -189,7 +187,13 @@ $conn->close();
         .btn-signout:hover {
             background-color: #c82333;
         }
-
+        .movie-image-mini {
+            width: 40px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 3px;
+        }
+        
         /* Mobile responsiveness */
         @media (max-width: 768px) {
             .sidebar {
@@ -211,15 +215,18 @@ $conn->close();
             .admin-user-info {
                 margin-top: 15px;
             }
+            .table-responsive {
+                overflow-x: auto;
+            }
         }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Theater Manager</a>
+        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="../logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -229,6 +236,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link active" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -242,11 +252,61 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -255,111 +315,112 @@ $conn->close();
                 <div class="admin-header">
                     <h1>Theater Manager Dashboard</h1>
                     <div class="admin-user-info">
-                        <img src="https://via.placeholder.com/40" alt="Admin Avatar">
-                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Theater Manager'); ?></span>
+                        <img src="https://via.placeholder.com/40" alt="Admin">
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
                 <div class="row">
-                    <div class="col-md-4">
-                        <div class="summary-card theaters">
-                            <h4>Total Theaters Managed</h4>
-                            <div class="count"><?php echo $theaterCount; ?></div>
+                    <div class="col-md-3">
+                        <div class="dashboard-card">
+                            <h4>Total Theaters</h4>
+                            <p><?php echo $theaterCount; ?></p>
                         </div>
                     </div>
-                    <div class="col-md-4">
-                        <div class="summary-card schedules">
-                            <h4>Active Schedules</h4>
-                            <div class="count"><?php echo $activeSchedulesCount; ?></div>
+                    <div class="col-md-3">
+                        <div class="dashboard-card">
+                            <h4>Total Schedules</h4>
+                            <p><?php echo $scheduleCount; ?></p>
                         </div>
                     </div>
-                    <div class="col-md-4">
-                        <div class="summary-card movies">
-                            <h4>Upcoming Movies</h4>
-                            <div class="count"><?php echo $upcomingMoviesCount; ?></div>
+                    <div class="col-md-3">
+                        <div class="dashboard-card">
+                            <h4>Total Bookings</h4>
+                            <p><?php echo $bookingCount; ?></p>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="dashboard-card">
+                            <h4>Total Movies</h4>
+                            <p><?php echo $movieCount; ?></p>
                         </div>
                     </div>
                 </div>
 
-                <div class="dashboard-section">
-                    <h3>Recent Schedules</h3>
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>Schedule ID</th>
-                                    <th>Movie</th>
-                                    <th>Theater</th>
-                                    <th>Hall</th>
-                                    <th>Date</th>
-                                    <th>Time</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($recentSchedules->num_rows > 0): ?>
-                                    <?php while ($schedule = $recentSchedules->fetch_assoc()): ?>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="recent-table-container">
+                            <h3 class="mb-3">Recent Schedules</h3>
+                            <div class="table-responsive">
+                                <table class="table table-striped table-sm">
+                                    <thead>
                                         <tr>
-                                            <td><?php echo $schedule['scheduleID']; ?></td>
-                                            <td><?php echo $schedule['movieTitle']; ?></td>
-                                            <td><?php echo $schedule['theaterName']; ?></td>
-                                            <td><?php echo $schedule['hallName']; ?></td>
-                                            <td><?php echo date('Y-m-d', strtotime($schedule['showDate'])); ?></td>
-                                            <td><?php echo date('h:i A', strtotime($schedule['showTime'])); ?></td>
-                                            <td>
-                                                <a href="edit_schedule.php?id=<?php echo $schedule['scheduleID']; ?>" class="btn btn-sm btn-warning">
-                                                    <i class="fas fa-edit"></i>
-                                                </a>
-                                            </td>
+                                            <th>ID</th>
+                                            <th>Movie</th>
+                                            <th>Theater</th>
+                                            <th>Date</th>
+                                            <th>Time</th>
                                         </tr>
-                                    <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="7" class="text-center">No recent schedules</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                                    </thead>
+                                    <tbody>
+                                        <?php if ($recentSchedules->num_rows > 0): ?>
+                                            <?php while ($schedule = $recentSchedules->fetch_assoc()): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['movieTitle'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['theaterName'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['showDate'] ? date('Y-m-d', strtotime($schedule['showDate'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['showTime'] ? date('H:i', strtotime($schedule['showTime'])) : 'N/A'); ?></td>
+                                                </tr>
+                                            <?php endwhile; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="5" class="text-center">No recent schedules</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <a href="schedules.php" class="btn btn-primary btn-sm">View All Schedules</a>
+                        </div>
                     </div>
-                    <a href="schedules.php" class="btn btn-primary btn-sm mt-3">View All Schedules</a>
-                </div>
-
-                <div class="dashboard-section">
-                    <h3>Recent Theaters Added</h3>
-                    <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Name</th>
-                                    <th>City</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($recentTheaters->num_rows > 0): ?>
-                                    <?php while ($theater = $recentTheaters->fetch_assoc()): ?>
+                    <div class="col-md-6">
+                        <div class="recent-table-container">
+                            <h3 class="mb-3">Recent Bookings</h3>
+                            <div class="table-responsive">
+                                <table class="table table-striped table-sm">
+                                    <thead>
                                         <tr>
-                                            <td><?php echo $theater['theaterID']; ?></td>
-                                            <td><?php echo $theater['theaterName']; ?></td>
-                                            <td><?php echo $theater['theaterCity']; ?></td>
-                                            <td><span class="badge badge-<?php echo $theater['theaterStatus'] == 'active' ? 'success' : 'danger'; ?>"><?php echo ucfirst($theater['theaterStatus']); ?></span></td>
-                                            <td>
-                                                <a href="edit_theater.php?id=<?php echo $theater['theaterID']; ?>" class="btn btn-sm btn-warning">
-                                                    <i class="fas fa-edit"></i>
-                                                </a>
-                                            </td>
+                                            <th>ID</th>
+                                            <th>Movie</th>
+                                            <th>Customer</th>
+                                            <th>Amount</th>
+                                            <th>Date</th>
+                                            <th>Time</th>
                                         </tr>
-                                    <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="5" class="text-center">No recent theaters</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                        <a href="theaters.php" class="btn btn-primary btn-sm mt-3">View All Theaters</a>
+                                    </thead>
+                                    <tbody>
+                                        <?php if ($recentBookings->num_rows > 0): ?>
+                                            <?php while ($booking = $recentBookings->fetch_assoc()): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($booking['bookingID']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['bookingFName'] . ' ' . $booking['bookingLName']); ?></td>
+                                                    <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showDate'] ? date('Y-m-d', strtotime($booking['showDate'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showTime'] ? date('H:i', strtotime($booking['showTime'])) : 'N/A'); ?></td>
+                                                </tr>
+                                            <?php endwhile; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="6" class="text-center">No recent bookings</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <a href="bookings.php" class="btn btn-primary btn-sm">View All Bookings</a>
+                        </div>
                     </div>
                 </div>
             </main>

@@ -1,15 +1,9 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: ../index.php");
-    exit();
-}
-
-// Ensure user has Theater Manager role (roleID = 2)
-if ($_SESSION['admin_role'] != 2) {
-    header("Location: ../dashboard.php"); // Redirect to main admin dashboard or access denied page
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -17,7 +11,7 @@ if ($_SESSION['admin_role'] != 2) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -25,102 +19,94 @@ if ($conn->connect_error) {
 }
 
 $theaterId = isset($_GET['theater_id']) ? (int)$_GET['theater_id'] : 0;
-$theaterName = '';
-$halls = [];
-$successMessage = '';
+$theaterName = "N/A";
+$halls = null;
 $errorMessage = '';
+$successMessage = '';
 
-// Fetch theater details
 if ($theaterId > 0) {
-    $stmt = $conn->prepare("SELECT theaterName FROM theaters WHERE theaterID = ?");
-    $stmt->bind_param("i", $theaterId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows > 0) {
-        $theaterData = $result->fetch_assoc();
-        $theaterName = $theaterData['theaterName'];
+    // Fetch theater name
+    $stmtTheater = $conn->prepare("SELECT theaterName FROM theaters WHERE theaterID = ?");
+    $stmtTheater->bind_param("i", $theaterId);
+    $stmtTheater->execute();
+    $resultTheater = $stmtTheater->get_result();
+    if ($rowTheater = $resultTheater->fetch_assoc()) {
+        $theaterName = $rowTheater['theaterName'];
     } else {
         $errorMessage = "Theater not found.";
     }
-    $stmt->close();
-} else {
-    $errorMessage = "Invalid Theater ID provided.";
-}
+    $stmtTheater->close();
 
-// Handle hall addition
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_hall'])) {
-    $hallName = $_POST['hallName'];
-    $hallType = $_POST['hallType'];
-    $totalSeats = $_POST['totalSeats'];
-    $hallStatus = $_POST['hallStatus'];
+    // Handle hall deletion
+    if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
+        $hallId = $_GET['delete_hall'];
 
-    if ($theaterId > 0) {
-        $stmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-        
-        if ($stmt->execute()) {
+        // Check for dependencies (schedules) before deleting hall
+        $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE hallID = ?");
+        $checkSchedulesQuery->bind_param("i", $hallId);
+        $checkSchedulesQuery->execute();
+        $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
+        $checkSchedulesQuery->close();
+
+        if ($schedulesCount > 0) {
+            $errorMessage = "Cannot delete hall. It has " . $schedulesCount . " schedule(s) associated. Please delete all associated schedules first.";
+        } else {
+            $deleteHallQuery = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ? AND theaterID = ?");
+            $deleteHallQuery->bind_param("ii", $hallId, $theaterId);
+            if ($deleteHallQuery->execute()) {
+                $successMessage = "Hall deleted successfully!";
+            } else {
+                $errorMessage = "Error deleting hall: " . $conn->error;
+            }
+            $deleteHallQuery->close();
+        }
+    }
+
+    // Handle hall addition
+    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_hall'])) {
+        $hallName = $_POST['hallName'];
+        $hallType = $_POST['hallType'];
+        $totalSeats = $_POST['totalSeats'];
+        $hallStatus = $_POST['hallStatus'];
+
+        $addHallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
+        $addHallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+        if ($addHallStmt->execute()) {
             $successMessage = "Hall added successfully!";
         } else {
-            $errorMessage = "Error adding hall: " . $stmt->error;
+            $errorMessage = "Error adding hall: " . $addHallStmt->error;
         }
-        $stmt->close();
-    } else {
-        $errorMessage = "Cannot add hall, Theater ID is missing.";
+        $addHallStmt->close();
     }
-}
 
-// Handle hall update
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_hall'])) {
-    $hallID = $_POST['hallID'];
-    $hallName = $_POST['hallName'];
-    $hallType = $_POST['hallType'];
-    $totalSeats = $_POST['totalSeats'];
-    $hallStatus = $_POST['hallStatus'];
+    // Handle hall update
+    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_hall'])) {
+        $hallIdToUpdate = $_POST['edit_hallId'];
+        $hallName = $_POST['edit_hallName'];
+        $hallType = $_POST['edit_hallType'];
+        $totalSeats = $_POST['edit_totalSeats'];
+        $hallStatus = $_POST['edit_hallStatus'];
 
-    $stmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ? WHERE hallID = ? AND theaterID = ?");
-    $stmt->bind_param("ssiisi", $hallName, $hallType, $totalSeats, $hallStatus, $hallID, $theaterId);
-    
-    if ($stmt->execute()) {
-        $successMessage = "Hall updated successfully!";
-    } else {
-        $errorMessage = "Error updating hall: " . $stmt->error;
-    }
-    $stmt->close();
-}
-
-// Handle hall deletion
-if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
-    $hallIDToDelete = $_GET['delete_hall'];
-
-    // Check if hall has associated schedules/bookings before deleting
-    $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE hallID = ?");
-    $checkSchedulesQuery->bind_param("i", $hallIDToDelete);
-    $checkSchedulesQuery->execute();
-    $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
-    $checkSchedulesQuery->close();
-
-    if ($schedulesCount > 0) {
-        $errorMessage = "Cannot delete hall. It has $schedulesCount associated schedule(s).";
-    } else {
-        $deleteStmt = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ? AND theaterID = ?");
-        $deleteStmt->bind_param("ii", $hallIDToDelete, $theaterId);
-        if ($deleteStmt->execute()) {
-            $successMessage = "Hall deleted successfully!";
+        $updateHallStmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ? WHERE hallID = ? AND theaterID = ?");
+        $updateHallStmt->bind_param("ssisii", $hallName, $hallType, $totalSeats, $hallStatus, $hallIdToUpdate, $theaterId);
+        if ($updateHallStmt->execute()) {
+            $successMessage = "Hall updated successfully!";
         } else {
-            $errorMessage = "Error deleting hall: " . $deleteStmt->error;
+            $errorMessage = "Error updating hall: " . $updateHallStmt->error;
         }
-        $deleteStmt->close();
+        $updateHallStmt->close();
     }
-}
 
 
-// Fetch halls for the current theater
-if ($theaterId > 0 && empty($errorMessage)) { // Only fetch if theater is valid and no critical error exists
-    $stmt = $conn->prepare("SELECT * FROM theater_halls WHERE theaterID = ? ORDER BY hallName");
-    $stmt->bind_param("i", $theaterId);
-    $stmt->execute();
-    $halls = $stmt->get_result();
-    $stmt->close();
+    // Get all halls for this theater
+    $hallsQuery = $conn->prepare("SELECT * FROM theater_halls WHERE theaterID = ? ORDER BY hallName");
+    $hallsQuery->bind_param("i", $theaterId);
+    $hallsQuery->execute();
+    $halls = $hallsQuery->get_result();
+    $hallsQuery->close();
+
+} else {
+    $errorMessage = "No theater ID provided. Please select a theater to manage its halls.";
 }
 
 $conn->close();
@@ -134,7 +120,7 @@ $conn->close();
     <title>Manage Halls for <?php echo htmlspecialchars($theaterName); ?> - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Path adjusted -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -233,47 +219,24 @@ $conn->close();
         }
         .hall-type-badge {
             padding: 3px 8px;
-            border-radius: 10px;
-            font-size: 0.75em;
+            border-radius: 12px;
+            font-size: 10px;
             font-weight: bold;
-            background-color: #007bff;
-            color: white;
             text-transform: capitalize;
+            background-color: #007bff; /* default blue */
+            color: white;
         }
-        .hall-type-badge.main-hall { background-color: #28a745; }
-        .hall-type-badge.vip-hall { background-color: #ffc107; color: #343a40;}
-        .hall-type-badge.private-hall { background-color: #6f42c1; }
-
-        /* Mobile responsiveness */
-        @media (max-width: 768px) {
-            .sidebar {
-                position: static;
-                height: auto;
-                padding: 0;
-            }
-            .sidebar-sticky {
-                height: auto;
-            }
-            .main-content {
-                margin-left: 0;
-                padding: 15px;
-            }
-            .admin-header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            .admin-user-info {
-                margin-top: 15px;
-            }
-        }
+        .hall-type-badge.main-hall { background-color: #28a745; } /* green */
+        .hall-type-badge.vip-hall { background-color: #ffc107; color: #343a40; } /* yellow */
+        .hall-type-badge.private-hall { background-color: #6f42c1; } /* purple */
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Theater Manager</a>
+        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -283,6 +246,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -296,11 +262,61 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -308,12 +324,19 @@ $conn->close();
             <main role="main" class="main-content">
                 <div class="admin-header">
                     <h1>Manage Halls for <?php echo htmlspecialchars($theaterName); ?></h1>
-                    <a href="theaters.php" class="btn btn-secondary">
-                        <i class="fas fa-arrow-left"></i> Back to Theaters
-                    </a>
+                    <div class="d-flex align-items-center">
+                        <a href="theaters.php" class="btn btn-secondary mr-2">
+                            <i class="fas fa-arrow-left"></i> Back to Theaters
+                        </a>
+                        <?php if ($theaterId > 0): ?>
+                        <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#addHallModal">
+                            <i class="fas fa-plus"></i> Add New Hall
+                        </button>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
-                <?php if (!empty($successMessage)): ?>
+                <?php if (isset($successMessage)): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <?php echo $successMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -322,7 +345,7 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
-                <?php if (!empty($errorMessage)): ?>
+                <?php if (isset($errorMessage)): ?>
                     <div class="alert alert-danger alert-dismissible fade show" role="alert">
                         <?php echo $errorMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -331,99 +354,111 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
-                <?php if ($theaterId > 0): ?>
-                    <div class="form-container">
-                        <h3 class="mb-4">Add New Hall</h3>
-                        <form action="theater_halls.php?theater_id=<?php echo $theaterId; ?>" method="POST">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="form-group">
-                                        <label for="hallName">Hall Name</label>
-                                        <input type="text" class="form-control" id="hallName" name="hallName" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="hallType">Hall Type</label>
-                                        <select class="form-control" id="hallType" name="hallType" required>
-                                            <option value="main-hall">Main Hall</option>
-                                            <option value="vip-hall">VIP Hall</option>
-                                            <option value="private-hall">Private Hall</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-group">
-                                        <label for="totalSeats">Total Seats</label>
-                                        <input type="number" class="form-control" id="totalSeats" name="totalSeats" required min="1">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="hallStatus">Status</label>
-                                        <select class="form-control" id="hallStatus" name="hallStatus" required>
-                                            <option value="active">Active</option>
-                                            <option value="inactive">Inactive</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-                            <button type="submit" name="add_hall" class="btn btn-primary">
-                                <i class="fas fa-plus"></i> Add Hall
-                            </button>
-                        </form>
+                <?php if ($theaterId == 0): ?>
+                    <div class="alert alert-info text-center">
+                        Please select a theater from the <a href="theaters.php">Theaters list</a> to manage its halls.
                     </div>
-
+                <?php elseif ($halls && $halls->num_rows > 0): ?>
                     <div class="table-container">
-                        <h3 class="mb-4">Existing Halls</h3>
                         <div class="table-responsive">
                             <table class="table table-striped table-hover">
                                 <thead class="thead-dark">
                                     <tr>
-                                        <th>ID</th>
-                                        <th>Name</th>
-                                        <th>Type</th>
-                                        <th>Seats</th>
+                                        <th>Hall ID</th>
+                                        <th>Hall Name</th>
+                                        <th>Hall Type</th>
+                                        <th>Total Seats</th>
                                         <th>Status</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php if ($halls && $halls->num_rows > 0): ?>
-                                        <?php while ($hall = $halls->fetch_assoc()): ?>
-                                            <tr>
-                                                <td><?php echo $hall['hallID']; ?></td>
-                                                <td><?php echo htmlspecialchars($hall['hallName']); ?></td>
-                                                <td><span class="hall-type-badge <?php echo htmlspecialchars($hall['hallType']); ?>"><?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['hallType']))); ?></span></td>
-                                                <td><?php echo $hall['totalSeats']; ?></td>
-                                                <td>
-                                                    <span class="status-badge <?php echo $hall['hallStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                        <?php echo ucfirst($hall['hallStatus']); ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <button type="button" class="btn btn-sm btn-warning edit-hall" 
-                                                            data-id="<?php echo $hall['hallID']; ?>"
-                                                            data-name="<?php echo htmlspecialchars($hall['hallName']); ?>"
-                                                            data-type="<?php echo htmlspecialchars($hall['hallType']); ?>"
-                                                            data-seats="<?php echo $hall['totalSeats']; ?>"
-                                                            data-status="<?php echo htmlspecialchars($hall['hallStatus']); ?>"
-                                                            data-toggle="modal" data-target="#editHallModal">
-                                                        <i class="fas fa-edit"></i>
-                                                    </button>
-                                                    <a href="theater_halls.php?theater_id=<?php echo $theaterId; ?>&delete_hall=<?php echo $hall['hallID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete all associated schedules.')">
-                                                        <i class="fas fa-trash"></i>
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        <?php endwhile; ?>
-                                    <?php else: ?>
+                                    <?php while ($hall = $halls->fetch_assoc()): ?>
                                         <tr>
-                                            <td colspan="6" class="text-center">No halls found for this theater.</td>
+                                            <td><?php echo htmlspecialchars($hall['hallID']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallName']); ?></td>
+                                            <td>
+                                                <span class="hall-type-badge <?php echo htmlspecialchars($hall['hallType']); ?>">
+                                                    <?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['hallType']))); ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo htmlspecialchars($hall['totalSeats']); ?></td>
+                                            <td>
+                                                <span class="status-badge <?php echo $hall['hallStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($hall['hallStatus'])); ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-warning edit-hall" 
+                                                        data-id="<?php echo htmlspecialchars($hall['hallID']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($hall['hallName']); ?>"
+                                                        data-type="<?php echo htmlspecialchars($hall['hallType']); ?>"
+                                                        data-seats="<?php echo htmlspecialchars($hall['totalSeats']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($hall['hallStatus']); ?>"
+                                                        data-toggle="modal" data-target="#editHallModal">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete_hall=<?php echo htmlspecialchars($hall['hallID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete associated schedules and bookings!')">
+                                                    <i class="fas fa-trash"></i>
+                                                </a>
+                                            </td>
                                         </tr>
-                                    <?php endif; ?>
+                                    <?php endwhile; ?>
                                 </tbody>
                             </table>
                         </div>
                     </div>
+                <?php else: ?>
+                    <div class="alert alert-info text-center">
+                        No halls found for <?php echo htmlspecialchars($theaterName); ?>. Click "Add New Hall" to get started.
+                    </div>
                 <?php endif; ?>
             </main>
+        </div>
+    </div>
+
+    <!-- Add Hall Modal -->
+    <div class="modal fade" id="addHallModal" tabindex="-1" role="dialog" aria-labelledby="addHallModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addHallModalLabel">Add New Hall to <?php echo htmlspecialchars($theaterName); ?></h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="hallName">Hall Name</label>
+                            <input type="text" class="form-control" id="hallName" name="hallName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="hallType">Hall Type</label>
+                            <select class="form-control" id="hallType" name="hallType" required>
+                                <option value="main-hall">Main Hall</option>
+                                <option value="vip-hall">VIP Hall</option>
+                                <option value="private-hall">Private Hall</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="totalSeats">Total Seats</label>
+                            <input type="number" class="form-control" id="totalSeats" name="totalSeats" required min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="hallStatus">Status</label>
+                            <select class="form-control" id="hallStatus" name="hallStatus" required>
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        <button type="submit" name="add_hall" class="btn btn-primary">Add Hall</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -437,16 +472,16 @@ $conn->close();
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
-                <form action="theater_halls.php?theater_id=<?php echo $theaterId; ?>" method="POST">
+                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST">
                     <div class="modal-body">
-                        <input type="hidden" id="edit_hallID" name="hallID">
+                        <input type="hidden" id="edit_hallId" name="edit_hallId">
                         <div class="form-group">
                             <label for="edit_hallName">Hall Name</label>
-                            <input type="text" class="form-control" id="edit_hallName" name="hallName" required>
+                            <input type="text" class="form-control" id="edit_hallName" name="edit_hallName" required>
                         </div>
                         <div class="form-group">
                             <label for="edit_hallType">Hall Type</label>
-                            <select class="form-control" id="edit_hallType" name="hallType" required>
+                            <select class="form-control" id="edit_hallType" name="edit_hallType" required>
                                 <option value="main-hall">Main Hall</option>
                                 <option value="vip-hall">VIP Hall</option>
                                 <option value="private-hall">Private Hall</option>
@@ -454,11 +489,11 @@ $conn->close();
                         </div>
                         <div class="form-group">
                             <label for="edit_totalSeats">Total Seats</label>
-                            <input type="number" class="form-control" id="edit_totalSeats" name="totalSeats" required min="1">
+                            <input type="number" class="form-control" id="edit_totalSeats" name="edit_totalSeats" required min="1">
                         </div>
                         <div class="form-group">
                             <label for="edit_hallStatus">Status</label>
-                            <select class="form-control" id="edit_hallStatus" name="hallStatus" required>
+                            <select class="form-control" id="edit_hallStatus" name="edit_hallStatus" required>
                                 <option value="active">Active</option>
                                 <option value="inactive">Inactive</option>
                             </select>
@@ -485,7 +520,7 @@ $conn->close();
             var seats = $(this).data('seats');
             var status = $(this).data('status');
             
-            $('#edit_hallID').val(id);
+            $('#edit_hallId').val(id);
             $('#edit_hallName').val(name);
             $('#edit_hallType').val(type);
             $('#edit_totalSeats').val(seats);

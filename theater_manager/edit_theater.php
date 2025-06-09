@@ -1,79 +1,75 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: ../index.php");
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
-
-// Ensure user has Theater Manager role (roleID = 2)
-if ($_SESSION['admin_role'] != 2) {
-    header("Location: ../dashboard.php"); // Redirect to main admin dashboard or access denied page
-    exit();
-}
-
-// Check if theater ID is provided
-if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
-    header("Location: theaters.php");
-    exit();
-}
-
-$theaterId = $_GET['id'];
 
 // Database connection
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
+$theaterId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $theater = null;
 $errorMessage = '';
 $successMessage = '';
 
-// Fetch theater data
-$stmt = $conn->prepare("SELECT * FROM theaters WHERE theaterID = ?");
-$stmt->bind_param("i", $theaterId);
-$stmt->execute();
-$result = $stmt->get_result();
-if ($result->num_rows > 0) {
-    $theater = $result->fetch_assoc();
+if ($theaterId > 0) {
+    // Fetch current theater details
+    $stmt = $conn->prepare("SELECT * FROM theaters WHERE theaterID = ?");
+    $stmt->bind_param("i", $theaterId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        $theater = $result->fetch_assoc();
+    } else {
+        $errorMessage = "Theater not found.";
+    }
+    $stmt->close();
 } else {
-    $errorMessage = "Theater not found.";
+    $errorMessage = "Invalid theater ID provided.";
 }
-$stmt->close();
 
 // Process form submission for update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_theater'])) {
-    $theaterName = $_POST['theaterName'];
-    $theaterAddress = $_POST['theaterAddress'];
-    $theaterCity = $_POST['theaterCity'];
-    $theaterState = $_POST['theaterState'];
-    $theaterZipcode = $_POST['theaterZipcode'];
-    $theaterPhone = $_POST['theaterPhone'];
-    $theaterEmail = $_POST['theaterEmail'];
-    $theaterStatus = $_POST['theaterStatus'];
-
-    $updateStmt = $conn->prepare("UPDATE theaters SET theaterName = ?, theaterAddress = ?, theaterCity = ?, theaterState = ?, theaterZipcode = ?, theaterPhone = ?, theaterEmail = ?, theaterStatus = ? WHERE theaterID = ?");
-    $updateStmt->bind_param("ssssssssi", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterId);
-    
-    if ($updateStmt->execute()) {
-        $successMessage = "Theater updated successfully!";
-        // Re-fetch theater data to display updated info
-        $stmt = $conn->prepare("SELECT * FROM theaters WHERE theaterID = ?");
-        $stmt->bind_param("i", $theaterId);
-        $stmt->execute();
-        $theater = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
+    if (!$theater) {
+        $errorMessage = "Cannot update: Theater not found.";
     } else {
-        $errorMessage = "Error updating theater: " . $updateStmt->error;
+        $theaterName = $_POST['theaterName'];
+        $theaterAddress = $_POST['theaterAddress'];
+        $theaterCity = $_POST['theaterCity'];
+        $theaterState = $_POST['theaterState'];
+        $theaterZipcode = $_POST['theaterZipcode'];
+        $theaterPhone = $_POST['theaterPhone'];
+        $theaterEmail = $_POST['theaterEmail'];
+        $theaterStatus = $_POST['theaterStatus'];
+
+        $updateStmt = $conn->prepare("UPDATE theaters SET theaterName = ?, theaterAddress = ?, theaterCity = ?, theaterState = ?, theaterZipcode = ?, theaterPhone = ?, theaterEmail = ?, theaterStatus = ? WHERE theaterID = ?");
+        $updateStmt->bind_param("ssssssssi", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterId);
+
+        if ($updateStmt->execute()) {
+            $successMessage = "Theater updated successfully!";
+            // Refresh theater data after update
+            $stmt = $conn->prepare("SELECT * FROM theaters WHERE theaterID = ?");
+            $stmt->bind_param("i", $theaterId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $theater = $result->fetch_assoc(); // Update $theater variable with new data
+            $stmt->close();
+        } else {
+            $errorMessage = "Error updating theater: " . $updateStmt->error;
+        }
+        $updateStmt->close();
     }
-    $updateStmt->close();
 }
 
 $conn->close();
@@ -87,7 +83,7 @@ $conn->close();
     <title>Edit Theater - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Path adjusted -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -174,10 +170,10 @@ $conn->close();
 </head>
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Theater Manager</a>
+        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -187,6 +183,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -200,11 +199,61 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -217,7 +266,7 @@ $conn->close();
                     </a>
                 </div>
 
-                <?php if (!empty($successMessage)): ?>
+                <?php if (isset($successMessage)): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <?php echo $successMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -226,7 +275,7 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
-                <?php if (!empty($errorMessage)): ?>
+                <?php if (isset($errorMessage)): ?>
                     <div class="alert alert-danger alert-dismissible fade show" role="alert">
                         <?php echo $errorMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -238,6 +287,7 @@ $conn->close();
                 <?php if ($theater): ?>
                     <div class="form-container">
                         <form action="" method="POST">
+                            <input type="hidden" name="theaterID" value="<?php echo htmlspecialchars($theater['theaterID']); ?>">
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
@@ -294,8 +344,6 @@ $conn->close();
                             </div>
                         </form>
                     </div>
-                <?php else: ?>
-                    <p class="text-center text-danger">Theater details could not be loaded.</p>
                 <?php endif; ?>
             </main>
         </div>

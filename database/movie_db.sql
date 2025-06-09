@@ -362,4 +362,13 @@ ALTER TABLE `seats`
 ALTER TABLE `theater_halls`
   ADD CONSTRAINT `fk_theater_halls_theaterID` FOREIGN KEY (`theaterID`) REFERENCES `theaters` (`theaterID`) ON DELETE CASCADE;
 
+ALTER TABLE `theaters` ADD `theaterPanoramaImg` VARCHAR(255) NULL AFTER `theaterEmail`;
+
+ALTER TABLE `theaters`
+ADD COLUMN `locationID` INT(11) NULL AFTER `theaterStatus`,
+ADD CONSTRAINT `fk_theaters_locationID` FOREIGN KEY (`locationID`) REFERENCES `locations` (`locationID`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+
+ALTER TABLE `theater_halls` ADD `hallPanoramaImg` VARCHAR(255) NULL AFTER `totalSeats`;
+
 COMMIT;

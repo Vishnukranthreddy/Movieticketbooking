@@ -1,8 +1,8 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
+// RBAC: Accessible only by Super Admin (roleID 1)
+if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     header("Location: index.php");
     exit();
 }
@@ -11,7 +11,7 @@ if (!isset($_SESSION['admin_id'])) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db";
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -19,6 +19,8 @@ if ($conn->connect_error) {
 }
 
 // Process form submission
+$errorMessage = '';
+$successMessage = '';
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Get form data
     $theaterName = $_POST['theaterName'];
@@ -30,48 +32,103 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $theaterEmail = $_POST['theaterEmail'];
     $theaterStatus = $_POST['theaterStatus'];
     
-    // Insert theater data
-    $stmt = $conn->prepare("INSERT INTO theaters (theaterName, theaterAddress, theaterCity, theaterState, theaterZipcode, theaterPhone, theaterEmail, theaterStatus) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("ssssssss", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus);
-    
-    if ($stmt->execute()) {
-        $theaterId = $conn->insert_id;
-        
-        // Check if we need to create default halls
-        if (isset($_POST['createDefaultHalls']) && $_POST['createDefaultHalls'] == 'yes') {
-            // Create main hall
-            $stmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
-            $hallName = "Main Hall";
-            $hallType = "main-hall";
-            $totalSeats = 120;
-            $hallStatus = "active";
-            $stmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-            $stmt->execute();
-            
-            // Create VIP hall
-            $hallName = "VIP Hall";
-            $hallType = "vip-hall";
-            $totalSeats = 80;
-            $stmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-            $stmt->execute();
-            
-            // Create private hall
-            $hallName = "Private Hall";
-            $hallType = "private-hall";
-            $totalSeats = 40;
-            $stmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-            $stmt->execute();
+    $theaterPanoramaImg = null; // Initialize panorama image path to null
+    $uploadOk = 1; // Flag for panorama image upload status (1=OK, 0=Error)
+
+    // Handle panorama image upload if provided
+    if (isset($_FILES["theaterPanoramaImage"]) && $_FILES["theaterPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+        $targetDir = "../img/panoramas/"; // Path relative to admin/ folder
+        // Ensure target directory exists and is writable
+        if (!is_dir($targetDir)) {
+            mkdir($targetDir, 0755, true); // Create recursively if needed
         }
+
+        $fileName = basename($_FILES["theaterPanoramaImage"]["name"]);
+        $uniqueFileName = uniqid() . "_" . $fileName; // Add unique prefix to prevent overwriting
+        $targetFilePath = $targetDir . $uniqueFileName;
+        $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
         
-        $successMessage = "Theater added successfully!";
-        // Redirect to theaters page after successful addition
-        header("Location: theaters.php?success=1");
-        exit();
-    } else {
-        $errorMessage = "Error: " . $stmt->error;
+        // Basic image validation
+        $check = @getimagesize($_FILES["theaterPanoramaImage"]["tmp_name"]); // Use @ to suppress warnings for invalid images
+        if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
+        if($_FILES["theaterPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; } // Larger size for panoramas
+        if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
+
+        if ($uploadOk == 0) {
+            // Error message already set by validation checks above
+        } else {
+            if (move_uploaded_file($_FILES["theaterPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                $theaterPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
+            } else {
+                $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
+                $uploadOk = 0; // Set uploadOk to 0 if move fails
+            }
+        }
+    } else if (isset($_FILES["theaterPanoramaImage"]) && $_FILES["theaterPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+        // Handle other file upload errors (e.g., UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE)
+        $errorMessage = "File upload error for panorama: " . $_FILES["theaterPanoramaImage"]["error"];
+        $uploadOk = 0;
     }
-    
-    $stmt->close();
+
+    // Only proceed with database insert if panorama upload (if attempted) was successful or no file was selected
+    if ($uploadOk !== 0) {
+        // Insert theater data using prepared statement
+        $stmt = $conn->prepare("INSERT INTO theaters (theaterName, theaterAddress, theaterCity, theaterState, theaterZipcode, theaterPhone, theaterEmail, theaterStatus, theaterPanoramaImg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        // 'sssssssss' for 8 strings + 1 potential string for panorama image
+        $stmt->bind_param("sssssssss", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg);
+        
+        if ($stmt->execute()) {
+            $theaterId = $conn->insert_id; // Get the ID of the newly inserted theater
+            
+            // Check if we need to create default halls
+            if (isset($_POST['createDefaultHalls']) && $_POST['createDefaultHalls'] == 'yes') {
+                // Prepared statement for hall insertion
+                // Note: We don't have hall panorama upload here as it's for specific halls, not default ones.
+                $hallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
+                $hallStatus = "active";
+
+                // Create Main Hall
+                $hallName = "Main Hall";
+                $hallType = "main-hall";
+                $totalSeats = 120;
+                if ($hallStmt) { // Check if prepare was successful
+                    $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+                    $hallStmt->execute();
+                }
+                
+                // Create VIP Hall
+                $hallName = "VIP Hall";
+                $hallType = "vip-hall";
+                $totalSeats = 80;
+                if ($hallStmt) {
+                    $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+                    $hallStmt->execute();
+                }
+                
+                // Create Private Hall
+                $hallName = "Private Hall";
+                $hallType = "private-hall";
+                $totalSeats = 40;
+                if ($hallStmt) {
+                    $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
+                    $hallStmt->execute();
+                }
+                if ($hallStmt) $hallStmt->close(); // Close the hall insertion statement
+            }
+            
+            $successMessage = "Theater added successfully!";
+            // Redirect to theaters page after successful addition
+            header("Location: theaters.php?success=1");
+            exit();
+        } else {
+            $errorMessage = "Error adding theater to database: " . $stmt->error;
+            // If DB insert fails, try to delete the uploaded panorama file to clean up
+            if ($theaterPanoramaImg && file_exists("../" . $theaterPanoramaImg)) {
+                unlink("../" . $theaterPanoramaImg);
+            }
+        }
+        $stmt->close();
+    }
 }
 
 $conn->close();
@@ -168,6 +225,15 @@ $conn->close();
             align-items: center;
             margin-bottom: 20px;
         }
+        .preview-image {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -185,40 +251,13 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link active" href="theaters.php">
-                                <i class="fas fa-building"></i>
-                                Theaters
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
-                                <i class="fas fa-map-marker-alt"></i>
-                                Locations
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="schedules.php">
-                                <i class="fas fa-calendar-alt"></i>
-                                Schedules
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="bookings.php">
-                                <i class="fas fa-ticket-alt"></i>
-                                Bookings
                             </a>
                         </li>
                         <li class="nav-item">
@@ -233,6 +272,54 @@ $conn->close();
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/theaters.php">
+                                <i class="fas fa-building"></i>
+                                Theaters
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/schedules.php">
+                                <i class="fas fa-calendar-alt"></i>
+                                Schedules
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Theater Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
                     </ul>
                 </div>
             </nav>
@@ -245,7 +332,7 @@ $conn->close();
                     </a>
                 </div>
 
-                <?php if (isset($errorMessage)): ?>
+                <?php if (isset($errorMessage) && !empty($errorMessage)): ?>
                     <div class="alert alert-danger alert-dismissible fade show" role="alert">
                         <?php echo $errorMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -255,7 +342,7 @@ $conn->close();
                 <?php endif; ?>
 
                 <div class="form-container">
-                    <form action="" method="POST">
+                    <form action="" method="POST" enctype="multipart/form-data">
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="form-group">
@@ -302,6 +389,13 @@ $conn->close();
                                         <option value="inactive">Inactive</option>
                                     </select>
                                 </div>
+
+                                <div class="form-group">
+                                    <label for="theaterPanoramaImage">Theater Panorama Image (Optional)</label>
+                                    <input type="file" class="form-control-file" id="theaterPanoramaImage" name="theaterPanoramaImage" onchange="previewTheaterPanorama(this)">
+                                    <img id="theaterPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                                    <small class="form-text text-muted">Upload a 360-degree panorama image for the theater (JPG, PNG).</small>
+                                </div>
                             </div>
                         </div>
                         
@@ -326,5 +420,21 @@ $conn->close();
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        function previewTheaterPanorama(input) {
+            var preview = document.getElementById('theaterPanoramaPreview');
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                }
+                reader.readAsDataURL(input.files[0]);
+            } else {
+                preview.style.display = 'none';
+                preview.src = '#';
+            }
+        }
+    </script>
 </body>
 </html>

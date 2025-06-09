@@ -230,7 +230,7 @@ $conn->close();
     <footer class="footer-bg text-gray-400 py-8 mt-12 no-print">
         <div class="container mx-auto text-center px-4">
             <p>&copy; <?php echo date('Y'); ?> Showtime Select. All rights reserved.</p>
-            <p class="text-sm">Designed with <i class="fas fa-heart text-red-500"></i> by 21stdev</p>
+            <p class="text-sm">Designed for educational purpose </p>
         </div>
     </footer>
 </body>

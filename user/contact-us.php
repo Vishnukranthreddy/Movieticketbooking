@@ -168,10 +168,7 @@ $conn->close();
                     </div>
                     <div>
                         <h3 class="text-xl font-semibold text-e94560 mb-2"><i class="fas fa-envelope mr-3"></i> E-mail</h3>
-                        <p><a href="mailto:cs22b1034@iiitr.ac.in" class="text-gray-300 hover:underline">cs22b1034@iiitr.ac.in</a></p>
-                        <p><a href="mailto:cs22b1022@iiitr.ac.in" class="text-gray-300 hover:underline">cs22b1022@iiitr.ac.in</a></p>
                         <p><a href="mailto:cs22b1058@iiitr.ac.in" class="text-gray-300 hover:underline">cs22b1058@iiitr.ac.in</a></p>
-                        <p><a href="mailto:cs22b1059@iiitr.ac.in" class="text-gray-300 hover:underline">cs22b1059@iiitr.ac.in</a></p>
                     </div>
                 </div>
             </div>
@@ -182,7 +179,7 @@ $conn->close();
     <footer class="footer-bg text-gray-400 py-8 mt-12">
         <div class="container mx-auto text-center px-4">
             <p>&copy; <?php echo date('Y'); ?> Showtime Select. All rights reserved.</p>
-            <p class="text-sm">Designed with <i class="fas fa-heart text-red-500"></i> by 21stdev</p>
+            <p class="text-sm">Designed for educational purpose </p>
         </div>
     </footer>
 </body>

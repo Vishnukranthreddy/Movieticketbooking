@@ -33,9 +33,11 @@ if (isset($_GET['id']) && is_numeric($_GET['id'])) {
 
     // Fetch movie schedules
     if ($movie) {
+        // Updated query to fetch hallPanoramaImg and theaterID
         $stmt = $conn->prepare("
             SELECT ms.scheduleID, ms.showDate, ms.showTime, ms.price,
-                   h.hallName, h.hallType, t.theaterName, t.theaterAddress, t.theaterCity
+                   h.hallName, h.hallType, h.hallPanoramaImg, -- Added hallPanoramaImg
+                   t.theaterName, t.theaterAddress, t.theaterCity, t.theaterID -- Added theaterID
             FROM movie_schedules ms
             JOIN theater_halls h ON ms.hallID = h.hallID
             JOIN theaters t ON h.theaterID = t.theaterID
@@ -101,6 +103,9 @@ $conn->close();
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
             transition: transform 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between; /* To push buttons to bottom */
         }
         .schedule-card:hover {
             transform: translateY(-3px);
@@ -115,12 +120,29 @@ $conn->close();
         .btn-primary:hover {
             background-color: #b82e4a;
         }
+        .btn-secondary-custom { /* Reusing existing style for consistency */
+            background-color: #3f5f8a;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: background-color 0.3s ease;
+        }
+        .btn-secondary-custom:hover {
+            background-color: #304a6c;
+        }
         .footer-bg {
             background-color: #16213e;
         }
         .logo-text {
             color: #e94560; /* Accent color for logo */
             font-weight: 700;
+        }
+        .schedule-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem; /* Space between buttons */
+            margin-top: auto; /* Push buttons to the bottom of the card */
+            padding-top: 1rem; /* Add some padding above buttons */
         }
     </style>
 </head>
@@ -132,6 +154,8 @@ $conn->close();
             <nav>
                 <ul class="flex space-x-6">
                     <li><a href="index.php" class="nav-link text-white hover:text-red-500">Home</a></li>
+                    <li><a href="schedule.php" class="nav-link text-white hover:text-red-500">Schedule</a></li>
+                    <li><a href="contact-us.php" class="nav-link text-white hover:text-red-500">Contact Us</a></li>
                     <?php if (isset($_SESSION['user_id'])): ?>
                         <li><a href="profile.php" class="nav-link text-white hover:text-red-500">Profile</a></li>
                         <li><a href="logout.php" class="nav-link text-white hover:text-red-500">Logout</a></li>
@@ -148,7 +172,7 @@ $conn->close();
     <main class="container mx-auto px-4 py-8">
         <?php if (!empty($errorMessage)): ?>
             <div class="bg-red-600 text-white p-4 rounded-lg mb-6 text-center">
-                <?php echo $errorMessage; ?>
+                <?php echo htmlspecialchars($errorMessage); ?>
             </div>
             <div class="text-center">
                 <a href="index.php" class="btn-primary inline-block">Back to Movies</a>
@@ -156,7 +180,7 @@ $conn->close();
         <?php elseif ($movie): ?>
             <div class="movie-detail-card p-8 flex flex-col md:flex-row items-center md:items-start gap-8">
                 <div class="md:w-1/3 flex-shrink-0">
-                    <img src="../<?php echo htmlspecialchars($movie['movieImg']); ?>" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-poster">
+                    <img src="../<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-poster">
                 </div>
                 <div class="md:w-2/3">
                     <h1 class="text-5xl font-bold text-white mb-4"><?php echo htmlspecialchars($movie['movieTitle']); ?></h1>
@@ -194,11 +218,20 @@ $conn->close();
                                     <p class="text-gray-300 text-md mb-1"><i class="fas fa-couch mr-2 text-e94560"></i> Hall: <?php echo htmlspecialchars($schedule['hallName']); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</p>
                                     <p class="text-gray-300 text-md mb-4"><i class="fas fa-map-marker-alt mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theaterAddress']) . ', ' . htmlspecialchars($schedule['theaterCity']); ?></p>
                                     <p class="text-white text-2xl font-bold mb-4">₹<?php echo number_format($schedule['price'], 2); ?></p>
-                                    <?php if (isset($_SESSION['user_id'])): ?>
-                                        <a href="booking.php?schedule_id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn-primary block text-center">Book Now</a>
-                                    <?php else: ?>
-                                        <a href="login.php?message=Please login to book tickets" class="btn-primary block text-center">Login to Book</a>
-                                    <?php endif; ?>
+                                    
+                                    <div class="schedule-buttons">
+                                        <?php if (isset($_SESSION['user_id'])): ?>
+                                            <a href="booking.php?schedule_id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn-primary block text-center">Book Now</a>
+                                        <?php else: ?>
+                                            <a href="login.php?message=Please login to book tickets" class="btn-primary block text-center">Login to Book</a>
+                                        <?php endif; ?>
+
+                                        <?php if (!empty($schedule['hallPanoramaImg'])): ?>
+                                            <a href="view_theater.php?theater_id=<?php echo htmlspecialchars($schedule['theaterID']); ?>&hall_panorama_img=<?php echo urlencode($schedule['hallPanoramaImg']); ?>&hall_name=<?php echo urlencode($schedule['hallName']); ?>&theater_name=<?php echo urlencode($schedule['theaterName']); ?>" class="btn-secondary-custom block text-center">View Hall Panorama</a>
+                                        <?php else: ?>
+                                            <span class="btn-secondary-custom opacity-50 cursor-not-allowed text-sm">No Hall Panorama</span>
+                                        <?php endif; ?>
+                                    </div>
                                 </div>
                             <?php endforeach; ?>
                         </div>
@@ -214,7 +247,7 @@ $conn->close();
     <footer class="footer-bg text-gray-400 py-8 mt-12">
         <div class="container mx-auto text-center px-4">
             <p>&copy; <?php echo date('Y'); ?> Showtime Select. All rights reserved.</p>
-            <p class="text-sm">Designed with <i class="fas fa-heart text-red-500"></i> by 21stdev</p>
+            <p class="text-sm">Designed for educational purpose </p>
         </div>
     </footer>
 </body>

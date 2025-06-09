@@ -33,7 +33,8 @@ if ($theaterId > 0) {
     if ($rowTheater = $resultTheater->fetch_assoc()) {
         $theaterName = $rowTheater['theaterName'];
     } else {
-        $errorMessage = "Theater not found.";
+        $errorMessage = "Theater not found for ID: " . $theaterId;
+        $theaterId = 0; // Invalidate theaterId if not found
     }
     $stmtTheater->close();
 
@@ -49,16 +50,37 @@ if ($theaterId > 0) {
         $checkSchedulesQuery->close();
 
         if ($schedulesCount > 0) {
-            $errorMessage = "Cannot delete hall. It has " . $schedulesCount . " schedule(s) associated. Please delete all associated schedules first.";
+            $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
         } else {
-            $deleteHallQuery = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ? AND theaterID = ?");
-            $deleteHallQuery->bind_param("ii", $hallId, $theaterId);
-            if ($deleteHallQuery->execute()) {
-                $successMessage = "Hall deleted successfully!";
-            } else {
-                $errorMessage = "Error deleting hall: " . $conn->error;
+            // Get hall panorama image path before deletion to remove the file
+            $stmtImg = $conn->prepare("SELECT hallPanoramaImg FROM theater_halls WHERE hallID = ?");
+            $stmtImg->bind_param("i", $hallId);
+            $stmtImg->execute();
+            $resultImg = $stmtImg->get_result();
+            $hallPanoramaImgPath = null;
+            if ($row = $resultImg->fetch_assoc()) {
+                $hallPanoramaImgPath = $row['hallPanoramaImg'];
             }
-            $deleteHallQuery->close();
+            $stmtImg->close();
+
+            $deleteHallQuery = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ? AND theaterID = ?");
+            if ($deleteHallQuery === false) {
+                $errorMessage = "Failed to prepare delete hall query: " . $conn->error;
+            } else {
+                $deleteHallQuery->bind_param("ii", $hallId, $theaterId);
+                if ($deleteHallQuery->execute()) {
+                    $successMessage = "Hall deleted successfully!";
+                    // Delete the associated image file if it exists
+                    if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from theater_manager/ to project root
+                        if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
+                            unlink("../" . $hallPanoramaImgPath);
+                        }
+                    }
+                } else {
+                    $errorMessage = "Error deleting hall: " . $conn->error;
+                }
+                $deleteHallQuery->close();
+            }
         }
     }
 
@@ -68,15 +90,61 @@ if ($theaterId > 0) {
         $hallType = $_POST['hallType'];
         $totalSeats = $_POST['totalSeats'];
         $hallStatus = $_POST['hallStatus'];
+        
+        $hallPanoramaImg = null; // Initialize to null
+        $uploadOk = 1; // Flag for panorama image upload status
 
-        $addHallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
-        $addHallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-        if ($addHallStmt->execute()) {
-            $successMessage = "Hall added successfully!";
-        } else {
-            $errorMessage = "Error adding hall: " . $addHallStmt->error;
+        // Handle panorama image upload if provided
+        if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+            $targetDir = "../img/panoramas/"; // Path relative to theater_manager/ folder
+            if (!is_dir($targetDir)) {
+                mkdir($targetDir, 0755, true);
+            }
+
+            $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
+            $uniqueFileName = uniqid() . "_" . $fileName;
+            $targetFilePath = $targetDir . $uniqueFileName;
+            $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+            
+            $check = @getimagesize($_FILES["hallPanoramaImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
+            if($_FILES["hallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; }
+            if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
+
+            if ($uploadOk == 0) {
+                // Error message already set
+            } else {
+                if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                    $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
+                } else {
+                    $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
+                    $uploadOk = 0;
+                }
+            }
+        } else if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+            $errorMessage = "File upload error for panorama: " . $_FILES["hallPanoramaImage"]["error"];
+            $uploadOk = 0;
         }
-        $addHallStmt->close();
+
+        if ($uploadOk !== 0) {
+            $addHallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus, hallPanoramaImg) VALUES (?, ?, ?, ?, ?, ?)");
+            if ($addHallStmt === false) {
+                $errorMessage = "Failed to prepare add hall query: " . $conn->error;
+            } else {
+                // CORRECTED bind_param: "isssis" -> "isiss" with 's' for panorama image
+                // TheaterID (int), HallName (string), HallType (string), TotalSeats (int), HallStatus (string), HallPanoramaImg (string)
+                $addHallStmt->bind_param("isiss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg); // CORRECTED TYPE STRING
+                if ($addHallStmt->execute()) {
+                    $successMessage = "Hall added successfully!";
+                } else {
+                    $errorMessage = "Error adding hall to database: " . $addHallStmt->error;
+                    if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
+                        unlink("../" . $hallPanoramaImg); // Clean up uploaded file on DB error
+                    }
+                }
+                $addHallStmt->close();
+            }
+        }
     }
 
     // Handle hall update
@@ -87,26 +155,88 @@ if ($theaterId > 0) {
         $totalSeats = $_POST['edit_totalSeats'];
         $hallStatus = $_POST['edit_hallStatus'];
 
-        $updateHallStmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ? WHERE hallID = ? AND theaterID = ?");
-        $updateHallStmt->bind_param("ssisii", $hallName, $hallType, $totalSeats, $hallStatus, $hallIdToUpdate, $theaterId);
-        if ($updateHallStmt->execute()) {
-            $successMessage = "Hall updated successfully!";
-        } else {
-            $errorMessage = "Error updating hall: " . $updateHallStmt->error;
+        $currentHallPanoramaImg = $_POST['current_hall_panorama_img'] ?? null; // Get existing path
+        $newHallPanoramaImg = $currentHallPanoramaImg; // Assume current image by default
+        $uploadOk = 1;
+
+        // Handle new panorama image upload for update
+        if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+            $targetDir = "../img/panoramas/";
+            if (!is_dir($targetDir)) { mkdir($targetDir, 0755, true); }
+            $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
+            $uniqueFileName = uniqid() . "_" . $fileName;
+            $targetFilePath = $targetDir . $uniqueFileName;
+            $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+
+            $check = @getimagesize($_FILES["editHallPanoramaImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "New panorama file is not a valid image."; $uploadOk = 0; }
+            if($_FILES["editHallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, new panorama file is too large (max 15MB)."; $uploadOk = 0; }
+            if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for new panoramas."; $uploadOk = 0; }
+
+            if ($uploadOk == 0) {
+                // Error already set
+            } else {
+                if (move_uploaded_file($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                    $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
+                    // Delete old panorama file if different and exists
+                    if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
+                        if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
+                            unlink("../" . $currentHallPanoramaImg);
+                        }
+                    }
+                } else {
+                    $errorMessage = "Error uploading new panorama file for update.";
+                    $uploadOk = 0;
+                }
+            }
+        } else if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+            $errorMessage = "File upload error for new panorama: " . $_FILES["editHallPanoramaImage"]["error"];
+            $uploadOk = 0;
         }
-        $updateHallStmt->close();
+
+        if ($uploadOk !== 0) {
+            $updateHallStmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ?, hallPanoramaImg = ? WHERE hallID = ? AND theaterID = ?");
+            if ($updateHallStmt === false) {
+                $errorMessage = "Failed to prepare update hall query: " . $conn->error;
+            } else {
+                // CORRECTED bind_param: "ssisii" -> "ssissii"
+                // hallName (s), hallType (s), totalSeats (i), hallStatus (s), hallPanoramaImg (s), hallID (i), theaterID (i)
+                $updateHallStmt->bind_param("ssissii", $hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId); // CORRECTED TYPE STRING
+                if ($updateHallStmt->execute()) {
+                    $successMessage = "Hall updated successfully!";
+                } else {
+                    $errorMessage = "Error updating hall in database: " . $updateHallStmt->error;
+                    // If DB update fails, consider deleting the newly uploaded panorama file to clean up
+                    if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
+                        unlink("../" . $newHallPanoramaImg);
+                    }
+                }
+                $updateHallStmt->close();
+            }
+        }
     }
 
 
     // Get all halls for this theater
-    $hallsQuery = $conn->prepare("SELECT * FROM theater_halls WHERE theaterID = ? ORDER BY hallName");
-    $hallsQuery->bind_param("i", $theaterId);
-    $hallsQuery->execute();
-    $halls = $hallsQuery->get_result();
-    $hallsQuery->close();
+    // Re-fetch after any add/delete/update operation
+    if ($theaterId > 0) {
+        $hallsQuery = $conn->prepare("SELECT * FROM theater_halls WHERE theaterID = ? ORDER BY hallName");
+        if ($hallsQuery === false) {
+            $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to prepare hall fetch query: " . $conn->error;
+            $halls = null;
+        } else {
+            $hallsQuery->bind_param("i", $theaterId);
+            $hallsQuery->execute();
+            $halls = $hallsQuery->get_result();
+            $hallsQuery->close();
+        }
+    } else {
+        $halls = null; // No halls if theaterId is invalid
+    }
 
 } else {
-    $errorMessage = "No theater ID provided. Please select a theater to manage its halls.";
+    $errorMessage = "No theater ID provided. Please select a theater from the Theaters list to manage its halls.";
+    $halls = null;
 }
 
 $conn->close();
@@ -229,6 +359,15 @@ $conn->close();
         .hall-type-badge.main-hall { background-color: #28a745; } /* green */
         .hall-type-badge.vip-hall { background-color: #ffc107; color: #343a40; } /* yellow */
         .hall-type-badge.private-hall { background-color: #6f42c1; } /* purple */
+        .preview-image {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -307,6 +446,12 @@ $conn->close();
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
                             <span>Content Management (Super Admin)</span>
                         </h6>
@@ -336,7 +481,7 @@ $conn->close();
                     </div>
                 </div>
 
-                <?php if (isset($successMessage)): ?>
+                <?php if (isset($successMessage) && !empty($successMessage)): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <?php echo $successMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -345,7 +490,7 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
-                <?php if (isset($errorMessage)): ?>
+                <?php if (isset($errorMessage) && !empty($errorMessage)): ?>
                     <div class="alert alert-danger alert-dismissible fade show" role="alert">
                         <?php echo $errorMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -368,6 +513,7 @@ $conn->close();
                                         <th>Hall Name</th>
                                         <th>Hall Type</th>
                                         <th>Total Seats</th>
+                                        <th>Panorama</th>
                                         <th>Status</th>
                                         <th>Actions</th>
                                     </tr>
@@ -384,6 +530,13 @@ $conn->close();
                                             </td>
                                             <td><?php echo htmlspecialchars($hall['totalSeats']); ?></td>
                                             <td>
+                                                <?php if (!empty($hall['hallPanoramaImg'])): ?>
+                                                    <img src="../<?php echo htmlspecialchars($hall['hallPanoramaImg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
+                                                <?php else: ?>
+                                                    N/A
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
                                                 <span class="status-badge <?php echo $hall['hallStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
                                                     <?php echo ucfirst(htmlspecialchars($hall['hallStatus'])); ?>
                                                 </span>
@@ -395,6 +548,7 @@ $conn->close();
                                                         data-type="<?php echo htmlspecialchars($hall['hallType']); ?>"
                                                         data-seats="<?php echo htmlspecialchars($hall['totalSeats']); ?>"
                                                         data-status="<?php echo htmlspecialchars($hall['hallStatus']); ?>"
+                                                        data-panorama="<?php echo htmlspecialchars($hall['hallPanoramaImg'] ?? ''); ?>"
                                                         data-toggle="modal" data-target="#editHallModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
@@ -427,7 +581,7 @@ $conn->close();
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
-                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST">
+                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
                     <div class="modal-body">
                         <div class="form-group">
                             <label for="hallName">Hall Name</label>
@@ -452,6 +606,12 @@ $conn->close();
                                 <option value="inactive">Inactive</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label for="hallPanoramaImage">Hall Panorama Image (Optional)</label>
+                            <input type="file" class="form-control-file" id="hallPanoramaImage" name="hallPanoramaImage" onchange="previewHallPanorama(this, 'addHallPanoramaPreview')">
+                            <img id="addHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                            <small class="form-text text-muted">Upload a 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
@@ -472,9 +632,10 @@ $conn->close();
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
-                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST">
+                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
                     <div class="modal-body">
                         <input type="hidden" id="edit_hallId" name="edit_hallId">
+                        <input type="hidden" id="current_hall_panorama_img" name="current_hall_panorama_img">
                         <div class="form-group">
                             <label for="edit_hallName">Hall Name</label>
                             <input type="text" class="form-control" id="edit_hallName" name="edit_hallName" required>
@@ -498,6 +659,13 @@ $conn->close();
                                 <option value="inactive">Inactive</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label for="editHallPanoramaImage">Hall Panorama Image (Optional)</label>
+                            <!-- Image preview for edit modal -->
+                            <img id="editHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                            <input type="file" class="form-control-file" id="editHallPanoramaImage" name="editHallPanoramaImage" onchange="previewHallPanorama(this, 'editHallPanoramaPreview')">
+                            <small class="form-text text-muted">Upload a new 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
@@ -512,6 +680,22 @@ $conn->close();
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
+        // Function to preview image for both add and edit modals
+        function previewHallPanorama(input, previewId) {
+            var preview = document.getElementById(previewId);
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                }
+                reader.readAsDataURL(input.files[0]);
+            } else {
+                preview.style.display = 'none';
+                preview.src = '#'; // Clear src
+            }
+        }
+
         // Fill edit modal with hall data
         $('.edit-hall').click(function() {
             var id = $(this).data('id');
@@ -519,12 +703,23 @@ $conn->close();
             var type = $(this).data('type');
             var seats = $(this).data('seats');
             var status = $(this).data('status');
-            
+            var panorama = $(this).data('panorama'); // Get panorama path
+
             $('#edit_hallId').val(id);
             $('#edit_hallName').val(name);
             $('#edit_hallType').val(type);
             $('#edit_totalSeats').val(seats);
             $('#edit_hallStatus').val(status);
+            $('#current_hall_panorama_img').val(panorama); // Set current panorama path in hidden field
+
+            var editPreview = document.getElementById('editHallPanoramaPreview');
+            if (panorama) {
+                editPreview.src = '../' + panorama; // Adjust path for display
+                editPreview.style.display = 'block';
+            } else {
+                editPreview.style.display = 'none';
+                editPreview.src = '#';
+            }
         });
     </script>
 </body>

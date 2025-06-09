@@ -1,15 +1,9 @@
 <?php
 session_start();
 
-// Check if user is logged in
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: ../index.php");
-    exit();
-}
-
-// Ensure user has Theater Manager role (roleID = 2)
-if ($_SESSION['admin_role'] != 2) {
-    header("Location: ../dashboard.php"); // Redirect to main admin dashboard or access denied page
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -17,7 +11,7 @@ if ($_SESSION['admin_role'] != 2) {
 $host = "localhost";
 $username = "root";
 $password = "";
-$database = "movie_db"; // Ensure consistent database
+$database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -45,7 +39,7 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
         $checkBookingsQuery->close();
         
         if ($bookingsCount > 0) {
-            $errorMessage = "Cannot delete schedule. It is associated with $bookingsCount booking(s).";
+            $errorMessage = "Cannot delete schedule. It is associated with " . $bookingsCount . " booking(s).";
         } else {
             // Delete the schedule
             $deleteQuery = $conn->prepare("DELETE FROM movie_schedules WHERE scheduleID = ?");
@@ -74,7 +68,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $status = $_POST['status'];
     
     $stmt = $conn->prepare("INSERT INTO movie_schedules (movieID, hallID, showDate, showTime, price, scheduleStatus) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("iissds", $movieId, $hallId, $showDate, $showTime, $price, $status);
+    $stmt->bind_param("iissds", $movieId, $hallId, $showDate, $showTime, $price, $status); // Use 'd' for decimal/double
     
     if ($stmt->execute()) {
         $successMessage = "Schedule added successfully!";
@@ -84,7 +78,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $stmt->close();
 }
 
-// Get all movies for dropdown (only active movies relevant for scheduling)
+// Get all movies for dropdown
 $movies = $conn->query("SELECT movieID, movieTitle FROM movietable ORDER BY movieTitle");
 
 // Get all theater halls for dropdown
@@ -108,8 +102,8 @@ $params = [];
 $types = '';
 
 if (!empty($search)) {
+    $searchParam = "%" . $search . "%";
     $searchCondition = "WHERE m.movieTitle LIKE ? OR t.theaterName LIKE ?";
-    $searchParam = "%$search%";
     $params = [$searchParam, $searchParam];
     $types = "ss";
 }
@@ -142,16 +136,20 @@ $query = "
     JOIN theaters t ON h.theaterID = t.theaterID
     " . $searchCondition . "
     ORDER BY ms.showDate DESC, ms.showTime DESC
-    LIMIT ?, ?
-";
+    LIMIT ?, ?";
 
 $stmt = $conn->prepare($query);
 
+// Rebind parameters for the main query
+$query_params = $params; // Copy search parameters
+$query_types = $types; // Copy search types
+
+$query_params[] = $offset;
+$query_params[] = $recordsPerPage;
+$query_types .= "ii";
+
 if (!empty($searchCondition)) {
-    $params[] = $offset;
-    $params[] = $recordsPerPage;
-    $types .= "ii";
-    $stmt->bind_param($types, ...$params);
+    $stmt->bind_param($query_types, ...$query_params);
 } else {
     $stmt->bind_param("ii", $offset, $recordsPerPage);
 }
@@ -171,7 +169,7 @@ $conn->close();
     <title>Manage Schedules - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Path adjusted -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
     <style>
         body {
             background-color: #f8f9fa;
@@ -286,10 +284,10 @@ $conn->close();
 </head>
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
-        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Theater Manager</a>
+        <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -299,6 +297,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -312,11 +313,67 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link active" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -385,26 +442,26 @@ $conn->close();
                                 <?php if ($schedules->num_rows > 0): ?>
                                     <?php while ($schedule = $schedules->fetch_assoc()): ?>
                                         <tr>
-                                            <td><?php echo $schedule['scheduleID']; ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
                                             <td><?php echo htmlspecialchars($schedule['movieTitle']); ?></td>
                                             <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
                                             <td>
                                                 <?php echo htmlspecialchars($schedule['hallName']); ?> 
-                                                <span class="hall-type">(<?php echo str_replace('-', ' ', htmlspecialchars($schedule['hallType'])); ?>)</span>
+                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</span>
                                             </td>
-                                            <td><?php echo date('d M Y', strtotime($schedule['showDate'])); ?></td>
-                                            <td><?php echo date('h:i A', strtotime($schedule['showTime'])); ?></td>
+                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showDate']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showTime']))); ?></td>
                                             <td>₹<?php echo number_format($schedule['price'], 2); ?></td>
                                             <td>
-                                                <span class="status-badge status-<?php echo $schedule['scheduleStatus']; ?>">
-                                                    <?php echo ucfirst($schedule['scheduleStatus']); ?>
+                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['scheduleStatus']); ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($schedule['scheduleStatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_schedule.php?id=<?php echo $schedule['scheduleID']; ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-warning"> <!-- Fixed: Points to edit_schedule.php -->
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="schedules.php?delete=<?php echo $schedule['scheduleID']; ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule?')">
+                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
@@ -469,24 +526,26 @@ $conn->close();
                             <label for="movieId">Movie</label>
                             <select class="form-control" id="movieId" name="movieId" required>
                                 <option value="">Select Movie</option>
-                                <?php while ($movie = $movies->fetch_assoc()): ?>
-                                    <option value="<?php echo $movie['movieID']; ?>">
+                                <?php // Reset movie results pointer if already fetched
+                                if ($movies->num_rows > 0) $movies->data_seek(0);
+                                while ($movie = $movies->fetch_assoc()): ?>
+                                    <option value="<?php echo htmlspecialchars($movie['movieID']); ?>">
                                         <?php echo htmlspecialchars($movie['movieTitle']); ?>
                                     </option>
                                 <?php endwhile; ?>
-                                <?php $movies->data_seek(0); // Reset pointer for potential reuse if needed, though not strictly necessary here ?>
                             </select>
                         </div>
                         <div class="form-group">
                             <label for="hallId">Theater Hall</label>
                             <select class="form-control" id="hallId" name="hallId" required>
                                 <option value="">Select Theater Hall</option>
-                                <?php while ($hall = $halls->fetch_assoc()): ?>
-                                    <option value="<?php echo $hall['hallID']; ?>">
+                                <?php // Reset hall results pointer if already fetched
+                                if ($halls->num_rows > 0) $halls->data_seek(0);
+                                while ($hall = $halls->fetch_assoc()): ?>
+                                    <option value="<?php echo htmlspecialchars($hall['hallID']); ?>">
                                         <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
                                     </option>
                                 <?php endwhile; ?>
-                                <?php $halls->data_seek(0); // Reset pointer ?>
                             </select>
                         </div>
                         <div class="form-group">

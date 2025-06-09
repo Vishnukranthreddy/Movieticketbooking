@@ -1,16 +1,9 @@
 <?php
-// Ensure session is started only once and at the very beginning
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
+session_start();
 
-// RBAC: Accessible only by Super Admin (roleID 1)
-// Check if admin_id is set AND admin_role is set AND admin_role is 1.
-// If any part fails, redirect to the central admin login.
-if (!isset($_SESSION['admin_id']) || !isset($_SESSION['admin_role']) || $_SESSION['admin_role'] != 1) {
-    // For robust debugging, uncomment the line below to see session state before redirect
-    // error_log("DEBUG: Unauthorized access attempt to admin/edit_movie.php. Session ID: " . session_id() . ", Admin ID: " . ($_SESSION['admin_id'] ?? 'N/A') . ", Admin Role: " . ($_SESSION['admin_role'] ?? 'N/A') . ", IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'N/A'));
-    header("Location: index.php"); // This redirects to admin/index.php (login page)
+// RBAC: Accessible by Super Admin (roleID 1) and Content Manager (roleID 3)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 3)) {
+    header("Location: index.php");
     exit();
 }
 
@@ -33,40 +26,26 @@ $successMessage = '';
 if ($movieId > 0) {
     // Fetch current movie details
     $stmt = $conn->prepare("SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = ?");
-    if ($stmt === false) {
-        $errorMessage = "Database prepare error for movie details: " . $conn->error;
+    $stmt->bind_param("i", $movieId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        $movie = $result->fetch_assoc();
     } else {
-        $stmt->bind_param("i", $movieId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        if ($result->num_rows > 0) {
-            $movie = $result->fetch_assoc();
-        } else {
-            $errorMessage = "Movie not found with ID: " . $movieId;
-        }
-        $stmt->close();
+        $errorMessage = "Movie not found.";
     }
+    $stmt->close();
 } else {
-    $errorMessage = "Invalid movie ID provided in URL.";
+    $errorMessage = "Invalid movie ID provided.";
 }
 
 // Get all locations for dropdown
-$locationsResult = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
-// Check if query was successful
-if ($locationsResult === false) {
-    $errorMessage .= ($errorMessage ? "<br>" : "") . "Error fetching locations: " . $conn->error;
-    $locations = []; // Provide an empty array to prevent issues in the loop
-} else {
-    $locations = [];
-    while ($row = $locationsResult->fetch_assoc()) {
-        $locations[] = $row;
-    }
-}
+$locations = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
 
 // Process form submission for update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
     if (!$movie) { // If movie wasn't found initially, don't proceed
-        $errorMessage = "Cannot update: Movie data is missing or invalid.";
+        $errorMessage = "Cannot update: Movie not found.";
     } else {
         $movieTitle = $_POST['movieTitle'];
         $movieGenre = $_POST['movieGenre'];
@@ -74,62 +53,51 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
         $movieRelDate = $_POST['movieRelDate'];
         $movieDirector = $_POST['movieDirector'];
         $movieActors = $_POST['movieActors'];
-        $locationID = $_POST['locationID'] ?: null; // Can be null, use null coalescing
+        $locationID = $_POST['locationID'] ?: null; // Can be null
         $mainHall = $_POST['mainHall'] ?: 0;
         $vipHall = $_POST['vipHall'] ?: 0;
         $privateHall = $_POST['privateHall'] ?: 0;
 
         $movieImg = $movie['movieImg']; // Keep existing image by default
-        $uploadOk = 1; // Flag for image upload status
 
         // Handle file upload if a new image is provided
         if (isset($_FILES["movieImage"]) && $_FILES["movieImage"]["error"] == UPLOAD_ERR_OK) {
-            // Path relative to admin/ for uploading, needs to go up one level to project root
-            $targetDir = "../img/"; 
-            // Ensure target directory exists and is writable
-            if (!is_dir($targetDir)) {
-                mkdir($targetDir, 0755, true);
-            }
-
+            $targetDir = "../img/"; // Path relative to admin folder
             $fileName = basename($_FILES["movieImage"]["name"]);
             $targetFilePath = $targetDir . $fileName;
             $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
-            
+            $uploadOk = 1;
+
             // Basic image validation
-            $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @ to suppress warnings for invalid images
-            if($check === false) { $errorMessage = "File is not a valid image."; $uploadOk = 0; }
+            $check = getimagesize($_FILES["movieImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "File is not an image."; $uploadOk = 0; }
             if($_FILES["movieImage"]["size"] > 5000000) { $errorMessage = "Sorry, your file is too large (max 5MB)."; $uploadOk = 0; }
             if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" && $fileType != "gif" ) { $errorMessage = "Sorry, only JPG, JPEG, PNG & GIF files are allowed."; $uploadOk = 0; }
 
             if ($uploadOk == 0) {
-                // Error message already set by validation checks above
+                // Do not proceed with update if new image upload fails
+                $errorMessage = "Image upload failed: " . $errorMessage;
             } else {
                 if (move_uploaded_file($_FILES["movieImage"]["tmp_name"], $targetFilePath)) {
-                    $movieImg = "img/" . $fileName; // Path to store in database (relative to project root)
+                    $movieImg = "img/" . $fileName; // Update image path
                     // Optional: Delete old image file if it exists and is different
-                    // `../` in `file_exists` context is relative to the current script (admin/)
                     if (!empty($movie['movieImg']) && $movie['movieImg'] != $movieImg && file_exists("../" . $movie['movieImg'])) {
-                        // Ensure the file path is safe and points to our img directory before attempting to unlink
-                        if (strpos($movie['movieImg'], 'img/') === 0 && realpath("../" . $movie['movieImg'])) { 
-                             unlink("../" . $movie['movieImg']);
-                        }
+                        unlink("../" . $movie['movieImg']);
                     }
                 } else {
                     $errorMessage = "Sorry, there was an error uploading the new image.";
-                    $uploadOk = 0; // Set uploadOk to 0 if move fails
                 }
             }
         }
         
-        // Only proceed with database update if image upload was successful (or no new image was uploaded)
-        if ($uploadOk !== 0) { 
+        // Only proceed with database update if no image upload error occurred
+        if (empty($errorMessage) || strpos($errorMessage, "Image upload failed") === false) {
             $updateStmt = $conn->prepare("UPDATE movietable SET movieImg = ?, movieTitle = ?, movieGenre = ?, movieDuration = ?, movieRelDate = ?, movieDirector = ?, movieActors = ?, locationID = ?, mainhall = ?, viphall = ?, privatehall = ? WHERE movieID = ?");
-            // Use 's' for strings, 'i' for integers, 'd' for double/decimal for price fields
             $updateStmt->bind_param("sssssssiisii", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId);
 
             if ($updateStmt->execute()) {
                 $successMessage = "Movie updated successfully!";
-                // Re-fetch movie data to display updated info immediately on the page
+                // Refresh movie data after update
                 $stmt = $conn->prepare("SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = ?");
                 $stmt->bind_param("i", $movieId);
                 $stmt->execute();
@@ -137,7 +105,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
                 $movie = $result->fetch_assoc(); // Update $movie variable with new data
                 $stmt->close();
             } else {
-                $errorMessage = "Error updating movie in database: " . $updateStmt->error;
+                $errorMessage = "Error updating movie: " . $updateStmt->error;
             }
             $updateStmt->close();
         }
@@ -155,7 +123,7 @@ $conn->close();
     <title>Edit Movie - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Path: admin/ -> project_root/img/ -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
     <style>
         body {
             background-color: #f8f9fa;
@@ -265,13 +233,40 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Admin Functions</span>
-                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="theaters.php">
+                                <i class="fas fa-building"></i>
+                                Theaters
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="schedules.php">
+                                <i class="fas fa-calendar-alt"></i>
+                                Schedules
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
                             </a>
                         </li>
                         <li class="nav-item">
@@ -281,57 +276,15 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
-                                <i class="fas fa-cog"></i>
-                                Settings
-                            </a>
-                        </li>
-                         <li class="nav-item">
                             <a class="nav-link" href="reports.php">
                                 <i class="fas fa-chart-bar"></i>
                                 Reports
                             </a>
                         </li>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Theater Management</span>
-                        </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/theaters.php">
-                                <i class="fas fa-building"></i>
-                                Theaters
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/locations.php">
-                                <i class="fas fa-map-marker-alt"></i>
-                                Locations
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/schedules.php">
-                                <i class="fas fa-calendar-alt"></i>
-                                Schedules
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/bookings.php">
-                                <i class="fas fa-ticket-alt"></i>
-                                Bookings
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/reports.php">
-                                <i class="fas fa-chart-bar"></i>
-                                Theater Reports
-                            </a>
-                        </li>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Content Management</span>
-                        </h6>
-                        <li class="nav-item">
-                            <a class="nav-link active" href="../content_manager/movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
+                            <a class="nav-link" href="settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
                             </a>
                         </li>
                     </ul>
@@ -408,20 +361,14 @@ $conn->close();
                                             <option value="">Select Location (Optional)</option>
                                             <?php
                                             // Reset pointer for locations query
-                                            // if ($locations->num_rows > 0) { // This check should be against the query result itself, not num_rows if locations might be empty
-                                            //     $locations->data_seek(0);
-                                            // }
-                                            if (is_array($locations) || (is_object($locations) && $locations->num_rows > 0)) {
-                                                // If $locations is an array (from error handling above) or a valid result set
-                                                foreach ($locations as $location) {
-                                            ?>
+                                            if ($locations->num_rows > 0) {
+                                                $locations->data_seek(0);
+                                            }
+                                            while ($location = $locations->fetch_assoc()): ?>
                                                 <option value="<?php echo htmlspecialchars($location['locationID']); ?>" <?php echo ($movie['locationID'] == $location['locationID']) ? 'selected' : ''; ?>>
                                                     <?php echo htmlspecialchars($location['locationName']); ?>
                                                 </option>
-                                            <?php
-                                                }
-                                            }
-                                            ?>
+                                            <?php endwhile; ?>
                                         </select>
                                     </div>
                                     
@@ -490,7 +437,6 @@ $conn->close();
                 reader.readAsDataURL(input.files[0]);
             } else {
                 // If no new file selected, revert to current image or placeholder
-                // Use the original movieImg path which is relative to the project root
                 preview.src = "<?php echo !empty($movie['movieImg']) ? '../' . htmlspecialchars($movie['movieImg']) : 'https://placehold.co/200x300/cccccc/333333?text=No+Img'; ?>";
             }
         }

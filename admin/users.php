@@ -76,6 +76,7 @@ $stmtUsers->close();
 
 // Process form submission for adding a new user
 $message = '';
+$messageType = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $newName = $_POST['name'];
     $newUsername = $_POST['username']; // This is treated as email
@@ -90,7 +91,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $checkQuery->close();
     
     if ($checkResult->num_rows > 0) {
-        $message = '<div class="alert alert-danger">Username (Email) already exists!</div>';
+        $message = 'Username (Email) already exists!';
+        $messageType = 'danger';
     } else {
         // Insert new user - Assuming plain text password for consistency with sample data
         // In a real application, ALWAYS hash passwords using password_hash()
@@ -98,15 +100,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
         $insertQuery->bind_param("ssss", $newUsername, $newName, $newPassword, $newPhone);
 
         if ($insertQuery->execute()) {
-            $message = '<div class="alert alert-success">User added successfully!</div>';
-            // Redirect to refresh the page and show updated user list
-            header("Location: users.php?success=1");
-            exit();
+            $message = 'User added successfully!';
+            $messageType = 'success';
+            // No redirect here, display message on same page
         } else {
-            $message = '<div class="alert alert-danger">Error: ' . $conn->error . '</div>';
+            $message = 'Error adding user: ' . $conn->error;
+            $messageType = 'danger';
         }
         $insertQuery->close();
     }
+    // Refresh current user list after add operation
+    $users = $conn->query($usersQuery)->get_result();
+    $users->data_seek(0); // Reset pointer
+}
+
+// Check for messages from GET parameters (e.g., from delete_user.php)
+if (isset($_GET['message']) && isset($_GET['type'])) {
+    $message = htmlspecialchars($_GET['message']);
+    $messageType = htmlspecialchars($_GET['type']);
 }
 
 $conn->close();
@@ -265,9 +276,6 @@ $conn->close();
 <body>
     <nav class="navbar navbar-dark fixed-top bg-dark flex-md-nowrap p-0 shadow">
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
-        <form class="w-100 d-none d-md-block" action="" method="GET">
-            <input class="form-control form-control-dark w-100" type="text" name="search" placeholder="Search users..." value="<?php echo htmlspecialchars($search); ?>">
-        </form>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
                 <a class="btn btn-signout" href="logout.php">Sign out</a>
@@ -280,40 +288,13 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="theaters.php">
-                                <i class="fas fa-building"></i>
-                                Theaters
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
-                                <i class="fas fa-map-marker-alt"></i>
-                                Locations
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="schedules.php">
-                                <i class="fas fa-calendar-alt"></i>
-                                Schedules
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="bookings.php">
-                                <i class="fas fa-ticket-alt"></i>
-                                Bookings
                             </a>
                         </li>
                         <li class="nav-item">
@@ -323,15 +304,57 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
+                            <a class="nav-link" href="settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
+                            </a>
+                        </li>
+                         <li class="nav-item">
                             <a class="nav-link" href="reports.php">
                                 <i class="fas fa-chart-bar"></i>
                                 Reports
                             </a>
                         </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
-                                <i class="fas fa-cog"></i>
-                                Settings
+                            <a class="nav-link" href="../theater_manager/theaters.php">
+                                <i class="fas fa-building"></i>
+                                Theaters
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/schedules.php">
+                                <i class="fas fa-calendar-alt"></i>
+                                Schedules
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Theater Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
                             </a>
                         </li>
                     </ul>
@@ -342,13 +365,18 @@ $conn->close();
                 <div class="admin-header">
                     <h1>Users Management</h1>
                     <div class="admin-user-info">
-                        <img src="https://via.placeholder.com/40" alt="Admin">
+                        <img src="https://placehold.co/40x40/cccccc/333333?text=Admin" alt="Admin">
                         <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
-                <?php if (isset($message)): // Display messages from add user ?>
-                    <?php echo $message; ?>
+                <?php if (isset($message)): // Display messages from add user or delete_user.php ?>
+                    <div class="alert alert-<?php echo htmlspecialchars($messageType); ?> alert-dismissible fade show" role="alert">
+                        <?php echo $message; ?>
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
                 <?php endif; ?>
 
                 <div class="table-container">
@@ -390,8 +418,6 @@ $conn->close();
                                             <td><?php echo htmlspecialchars($user['username']); ?></td>
                                             <td><?php echo htmlspecialchars($user['phone'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <!-- Edit/Delete links for users -->
-                                                <!-- You'd need edit_user.php and delete_user.php -->
                                                 <a href="edit_user.php?id=<?php echo htmlspecialchars($user['id']); ?>" class="btn btn-sm btn-primary">
                                                     <i class="fas fa-edit"></i>
                                                 </a>

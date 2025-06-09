@@ -1,9 +1,14 @@
 <?php
 session_start();
 
+// Initialize a message variable
+$statusMessage = '';
+$messageType = 'error'; // Default message type
+
 // RBAC: Accessible only by Super Admin (roleID 1)
 if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
-    header("Location: index.php");
+    $statusMessage = "Access Denied: You do not have permission to delete users.";
+    header("Location: users.php?message=" . urlencode($statusMessage) . "&type=" . $messageType);
     exit();
 }
 
@@ -15,49 +20,64 @@ $database = "movie_db"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+    $statusMessage = "Database connection failed: " . $conn->connect_error;
+    // Log error for debugging on server side if possible
+    error_log("DB Connection Error in delete_user.php: " . $conn->connect_error);
+    header("Location: users.php?message=" . urlencode($statusMessage) . "&type=" . $messageType);
+    exit();
 }
 
 $userId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-$redirectUrl = "users.php"; // Default redirect location
 
 if ($userId > 0) {
-    // Prevent self-deletion for the logged-in admin (optional but good practice)
+    // Prevent self-deletion for the logged-in admin
     if ($userId == $_SESSION['admin_id']) {
-        $redirectUrl .= "?error=" . urlencode("You cannot delete your own admin account.");
-        header("Location: " . $redirectUrl);
-        exit();
-    }
-
-    // Check if the user is associated with any bookings (via bookingEmail or username)
-    // Assuming `users.username` corresponds to `bookingtable.bookingEmail`
-    $checkBookingsQuery = $conn->prepare("SELECT COUNT(*) as count FROM bookingtable WHERE bookingEmail = (SELECT username FROM users WHERE id = ?)");
-    $checkBookingsQuery->bind_param("i", $userId);
-    $checkBookingsQuery->execute();
-    $bookingsCount = $checkBookingsQuery->get_result()->fetch_assoc()['count'];
-    $checkBookingsQuery->close();
-
-    if ($bookingsCount > 0) {
-        $errorMessage = "Cannot delete user. This user has " . $bookingsCount . " booking(s). Please delete their bookings first.";
-        $redirectUrl .= "?error=" . urlencode($errorMessage);
+        $statusMessage = "You cannot delete your own admin account.";
+        $messageType = "danger"; // Use danger for critical errors
     } else {
-        // Proceed with deletion
-        $deleteQuery = $conn->prepare("DELETE FROM users WHERE id = ?");
-        $deleteQuery->bind_param("i", $userId);
-        
-        if ($deleteQuery->execute()) {
-            $redirectUrl .= "?success=User deleted successfully!";
+        // Check if the user is associated with any bookings (via bookingEmail or username)
+        // Assuming `users.username` corresponds to `bookingtable.bookingEmail`
+        $checkBookingsQuery = $conn->prepare("SELECT COUNT(*) as count FROM bookingtable WHERE bookingEmail = (SELECT username FROM users WHERE id = ?)");
+        if ($checkBookingsQuery === false) {
+             $statusMessage = "Failed to prepare booking check query: " . $conn->error;
         } else {
-            $redirectUrl .= "?error=Error deleting user: " . urlencode($conn->error);
+            $checkBookingsQuery->bind_param("i", $userId);
+            $checkBookingsQuery->execute();
+            $bookingsResult = $checkBookingsQuery->get_result();
+            $bookingsCount = $bookingsResult->fetch_assoc()['count'];
+            $checkBookingsQuery->close();
+
+            if ($bookingsCount > 0) {
+                $statusMessage = "Cannot delete user. This user has " . $bookingsCount . " booking(s). Please delete their bookings first.";
+                $messageType = "warning"; // Use warning for non-critical user-fixable issues
+            } else {
+                // Proceed with deletion
+                $deleteQuery = $conn->prepare("DELETE FROM users WHERE id = ?");
+                if ($deleteQuery === false) {
+                    $statusMessage = "Failed to prepare user deletion query: " . $conn->error;
+                } else {
+                    $deleteQuery->bind_param("i", $userId);
+                    
+                    if ($deleteQuery->execute()) {
+                        $statusMessage = "User deleted successfully!";
+                        $messageType = "success";
+                    } else {
+                        $statusMessage = "Error deleting user: " . $conn->error;
+                        // Log specific DB error for server-side debugging
+                        error_log("DB Delete Error in delete_user.php: " . $conn->error);
+                    }
+                    $deleteQuery->close();
+                }
+            }
         }
-        $deleteQuery->close();
     }
 } else {
-    $redirectUrl .= "?error=Invalid user ID provided for deletion.";
+    $statusMessage = "Invalid user ID provided for deletion.";
 }
 
 $conn->close();
 
-header("Location: " . $redirectUrl);
+// Redirect back to users.php with the status message
+header("Location: users.php?message=" . urlencode($statusMessage) . "&type=" . $messageType);
 exit();
 ?>

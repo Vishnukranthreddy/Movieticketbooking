@@ -2,6 +2,7 @@
 session_start();
 
 // RBAC: Accessible by all logged-in admins (roleID 1, 2, 3)
+// Role IDs: 1=Super Admin, 2=Theater Manager, 3=Content Manager
 if (!isset($_SESSION['admin_id'])) {
     header("Location: index.php");
     exit();

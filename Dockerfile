@@ -16,10 +16,10 @@ COPY . /var/www/html/
 # This might already be default, but ensures consistency
 # Commented out as .htaccess file doesn't exist in the repository
 # COPY ./.htaccess /var/www/html/.htaccess # Copy your existing .htaccess if you have one
-COPY ./apache-config.conf /etc/apache2/sites-available/000-default.conf # See below for apache-config.conf
+COPY ./apache-config.conf /etc/apache2/sites-available/000-default.conf
 
 # Expose port 80 (Apache's default port)
-EXPOSE 3306
+EXPOSE 80
 
 # Command to run Apache web server
 CMD ["apache2-foreground"]

@@ -1,0 +1,16 @@
+version: '3'
+
+services:
+  web:
+    build: .
+    ports:
+      - "80:80"
+    environment:
+      - DB_HOST=sql12.freesqldatabase.com
+      - DB_PORT=3306
+      - DB_USERNAME=sql12784044
+      - DB_PASSWORD=Whcw9IFzSV
+      - DB_DATABASE=sql12784044
+    volumes:
+      - ./:/var/www/html
+    restart: always

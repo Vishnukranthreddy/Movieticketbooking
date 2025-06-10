@@ -19,7 +19,7 @@ COPY . /var/www/html/
 COPY ./apache-config.conf /etc/apache2/sites-available/000-default.conf # See below for apache-config.conf
 
 # Expose port 80 (Apache's default port)
-EXPOSE 80
+EXPOSE 3306
 
 # Command to run Apache web server
 CMD ["apache2-foreground"]

@@ -2,10 +2,10 @@
 session_start();
 
 // Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";
+$host = "sql12.freesqldatabase.com";
+$username = "sql12784044";
+$password = "Whcw9IFzSV";
+$database = "sql12784044";
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

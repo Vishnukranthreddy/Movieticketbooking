@@ -8,10 +8,10 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
 }
 
 // Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
+$host = "sql12.freesqldatabase.com";
+$username = "sql12784044";
+$password = "Whcw9IFzSV";
+$database = "sql12784044"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {
@@ -450,10 +450,10 @@ Here is the updated `user/index.php`:
 session_start();
 
 // Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
+$host = "sql12.freesqldatabase.com";
+$username = "sql12784044";
+$password = "Whcw9IFzSV";
+$database = "sql12784044"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

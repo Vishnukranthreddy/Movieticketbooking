@@ -16,10 +16,10 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 $scheduleId = $_GET['id'];
 
 // Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensure consistent database
+$host = "sql12.freesqldatabase.com";
+$username = "sql12784044";
+$password = "Whcw9IFzSV";
+$database = "sql12784044"; // Ensure consistent database
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

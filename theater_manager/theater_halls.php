@@ -131,9 +131,9 @@ if ($theaterId > 0) {
             if ($addHallStmt === false) {
                 $errorMessage = "Failed to prepare add hall query: " . $conn->error;
             } else {
-                // CORRECTED bind_param: "isssis" -> "isiss" with 's' for panorama image
+                // CORRECTED bind_param: "isssis" -> "isisss" with 's' for panorama image
                 // TheaterID (int), HallName (string), HallType (string), TotalSeats (int), HallStatus (string), HallPanoramaImg (string)
-                $addHallStmt->bind_param("isiss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg); // CORRECTED TYPE STRING
+                $addHallStmt->bind_param("isisss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg); // CORRECTED TYPE STRING
                 if ($addHallStmt->execute()) {
                     $successMessage = "Hall added successfully!";
                 } else {

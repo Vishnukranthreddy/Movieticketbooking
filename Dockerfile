@@ -14,7 +14,8 @@ COPY . /var/www/html/
 
 # Configure Apache to serve index.php first and to respect .htaccess
 # This might already be default, but ensures consistency
-COPY ./.htaccess /var/www/html/.htaccess # Copy your existing .htaccess if you have one
+# Commented out as .htaccess file doesn't exist in the repository
+# COPY ./.htaccess /var/www/html/.htaccess # Copy your existing .htaccess if you have one
 COPY ./apache-config.conf /etc/apache2/sites-available/000-default.conf # See below for apache-config.conf
 
 # Expose port 80 (Apache's default port)

@@ -12,8 +12,8 @@ SET time_zone = "+00:00";
 --
 -- Create Database if not exists
 --
-CREATE DATABASE IF NOT EXISTS `movie_db` DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci;
-USE `movie_db`;
+CREATE DATABASE IF NOT EXISTS `sql12784044` DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci;
+USE `sql12784044`;
 
 -- --------------------------------------------------------
 
@@ -364,10 +364,13 @@ ALTER TABLE `theater_halls` ADD `hallPanoramaImg` VARCHAR(255) NULL AFTER `total
 --
 -- Dumping data for table `theater_halls`
 --
-INSERT INTO `theater_halls` (`theaterID`, `hallName`, `hallType`, `totalSeats`, `hallPanoramaImg`) VALUES
-(1, 'Hall 1', 'main-hall', 120, 'img/panoramas/6846c1e1f2a40_360_F_526.jpg'),
-(2, 'Hall 2', 'vip-hall', 100, 'img/panoramas/6846c54edbb76_an.jpg'),
-(3, 'Hall 1', 'main-hall', 200, 'img/panoramas/abc.jpg');
+INSERT INTO `theater_halls` (`hallID`, `theaterID`, `hallName`, `hallType`, `totalSeats`, `hallPanoramaImg`, `hallStatus`) VALUES
+(1, 1, 'Hall 1', 'main-hall', 120, 'img/panoramas/pvr_lobby.jpg', 'active'),
+(2, 1, 'Hall 2', 'vip-hall', 100, 'img/panoramas/pvr_lobby.jpg', 'active'),
+(3, 1, 'Hall 3', 'private-hall', 80, 'img/panoramas/pvr_lobby.jpg', 'active'),
+(4, 2, 'Hall 1', 'main-hall', 150, 'img/panoramas/inox_entrance.jpg', 'active'),
+(5, 2, 'Hall 2', 'vip-hall', 100, 'img/panoramas/inox_entrance.jpg', 'active'),
+(6, 3, 'Hall 1', 'main-hall', 200, 'img/panoramas/cinepolis_exterior.jpg', 'active');
 
 -- --------------------------------------------------------
 
@@ -385,5 +388,8 @@ WHERE `theaterID` = 2; -- Assuming INOX Movies is theaterID 2
 UPDATE `theaters`
 SET `theaterPanoramaImg` = 'img/panoramas/cinepolis_exterior.jpg' -- Replace with your actual image path
 WHERE `theaterID` = 3; -- Assuming Cinepolis is theaterID 3
+
+
+
 
 COMMIT;

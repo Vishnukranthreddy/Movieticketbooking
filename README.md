@@ -43,5 +43,3 @@ docker-compose up -d
 ## Database
 The application uses MySQL on port 3306. Make sure this port is open and accessible from your deployment environment.
 
-## License
-[Your License Information]

@@ -7,6 +7,9 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
+// Include upload helper functions
+require_once('upload_helper.php');
+
 // Database connection
 $host = "sql12.freesqldatabase.com";
 $username = "sql12784044";
@@ -111,103 +114,22 @@ if ($theaterId > 0) {
 
             // Handle panorama image upload if provided
             if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                $targetDir = "../img/panoramas/"; // Path relative to admin/ folder
-                
-                // Debug information
+                // Initialize debug array
                 $debugInfo = [];
-                $debugInfo[] = "Upload temp file: " . $_FILES["hallPanoramaImage"]["tmp_name"];
-                $debugInfo[] = "Temp file exists: " . (file_exists($_FILES["hallPanoramaImage"]["tmp_name"]) ? 'Yes' : 'No');
-                $debugInfo[] = "Temp file readable: " . (is_readable($_FILES["hallPanoramaImage"]["tmp_name"]) ? 'Yes' : 'No');
                 
-                // Ensure the target directory exists with proper permissions
-                $targetDir = realpath("..") . "/img/panoramas/"; // Use absolute path
-                $debugInfo[] = "Target directory (absolute): " . $targetDir;
+                // Set up primary and fallback directories
+                $primaryDir = realpath("..") . "/img/panoramas/";
+                $fallbackDir = realpath("..") . "/uploads/panoramas/";
                 
-                if (!file_exists($targetDir)) {
-                    $debugInfo[] = "Target directory does not exist, creating...";
-                    if (!mkdir($targetDir, 0777, true)) {
-                        $errorMessage = "Failed to create panorama directory. Please check server permissions.";
-                        $debugInfo[] = "Directory creation failed: " . error_get_last()['message'];
-                        $uploadOk = 0;
-                    } else {
-                        $debugInfo[] = "Directory created successfully";
-                    }
-                } else {
-                    $debugInfo[] = "Target directory exists";
-                }
-                
-                // Make sure the directory is writable
-                if (!is_writable($targetDir) && $uploadOk == 1) {
-                    $debugInfo[] = "Directory not writable, attempting to set permissions...";
-                    chmod($targetDir, 0777);
-                    if (!is_writable($targetDir)) {
-                        $errorMessage = "Panorama directory is not writable. Please check server permissions.";
-                        $debugInfo[] = "Failed to make directory writable";
-                        $uploadOk = 0;
-                    } else {
-                        $debugInfo[] = "Directory permissions updated successfully";
-                    }
-                } else if ($uploadOk == 1) {
-                    $debugInfo[] = "Directory is writable";
-                }
-
-                // Clean the filename to remove problematic characters
-                $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
-                $fileName = preg_replace('/[^a-zA-Z0-9_.-]/', '_', $fileName); // Replace problematic chars with underscore
-                $uniqueFileName = uniqid() . "_" . $fileName;
-                $targetFilePath = $targetDir . $uniqueFileName;
-                $debugInfo[] = "Target file path: " . $targetFilePath;
-                
-                $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
-                $debugInfo[] = "File type: " . $fileType;
-                
-                $check = @getimagesize($_FILES["hallPanoramaImage"]["tmp_name"]);
-                if($check === false) { 
-                    $errorMessage = "Panorama file is not a valid image."; 
-                    $debugInfo[] = "File validation failed: Not a valid image";
-                    $uploadOk = 0; 
-                } else {
-                    $debugInfo[] = "File validation passed: Valid image";
-                }
-                
-                if($_FILES["hallPanoramaImage"]["size"] > 15000000) { 
-                    $errorMessage = "Sorry, panorama file is too large (max 15MB)."; 
-                    $debugInfo[] = "File validation failed: File too large (" . $_FILES["hallPanoramaImage"]["size"] . " bytes)";
-                    $uploadOk = 0; 
-                }
-                
-                if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { 
-                    $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; 
-                    $debugInfo[] = "File validation failed: Invalid file type";
-                    $uploadOk = 0; 
-                }
-
-                if ($uploadOk == 0) {
-                    // Error message already set
-                    $debugInfo[] = "Upload aborted due to validation errors";
-                } else {
-                    $debugInfo[] = "Attempting to move uploaded file...";
-                    // Try direct copy as a fallback if move_uploaded_file fails
-                    if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
-                        $debugInfo[] = "File moved successfully using move_uploaded_file()";
-                        $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
-                    } else {
-                        $moveError = error_get_last();
-                        $debugInfo[] = "move_uploaded_file() failed: " . ($moveError ? $moveError['message'] : 'Unknown error');
-                        
-                        // Try alternative method - direct copy
-                        $debugInfo[] = "Attempting alternative copy method...";
-                        if (copy($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
-                            $debugInfo[] = "File copied successfully using copy()";
-                            $hallPanoramaImg = "img/panoramas/" . $uniqueFileName;
-                        } else {
-                            $copyError = error_get_last();
-                            $debugInfo[] = "copy() failed: " . ($copyError ? $copyError['message'] : 'Unknown error');
-                            $errorMessage = "Failed to upload file. Please contact administrator.";
-                            $uploadOk = 0;
-                        }
-                    }
-                }
+                // Use our helper function to handle the upload
+                $hallPanoramaImg = handleFileUpload(
+                    $_FILES["hallPanoramaImage"],
+                    $primaryDir,
+                    $fallbackDir,
+                    $debugInfo,
+                    $errorMessage,
+                    $uploadOk
+                );
                 
                 // Log debug information to a file for troubleshooting
                 $logFile = "../logs/upload_debug.log";
@@ -262,125 +184,38 @@ if ($theaterId > 0) {
 
             // Handle new panorama image upload for update
             if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                $targetDir = "../img/panoramas/";
-                
-                // Debug information
+                // Initialize debug array
                 $debugInfo = [];
-                $debugInfo[] = "Edit Upload temp file: " . $_FILES["editHallPanoramaImage"]["tmp_name"];
-                $debugInfo[] = "Temp file exists: " . (file_exists($_FILES["editHallPanoramaImage"]["tmp_name"]) ? 'Yes' : 'No');
-                $debugInfo[] = "Temp file readable: " . (is_readable($_FILES["editHallPanoramaImage"]["tmp_name"]) ? 'Yes' : 'No');
                 
-                // Ensure the target directory exists with proper permissions
-                $targetDir = realpath("..") . "/img/panoramas/"; // Use absolute path
-                $debugInfo[] = "Target directory (absolute): " . $targetDir;
+                // Set up primary and fallback directories
+                $primaryDir = realpath("..") . "/img/panoramas/";
+                $fallbackDir = realpath("..") . "/uploads/panoramas/";
                 
-                if (!file_exists($targetDir)) {
-                    $debugInfo[] = "Target directory does not exist, creating...";
-                    if (!mkdir($targetDir, 0777, true)) {
-                        $errorMessage = "Failed to create panorama directory. Please check server permissions.";
-                        $debugInfo[] = "Directory creation failed: " . error_get_last()['message'];
-                        $uploadOk = 0;
-                    } else {
-                        $debugInfo[] = "Directory created successfully";
-                    }
-                } else {
-                    $debugInfo[] = "Target directory exists";
-                }
+                // Use our helper function to handle the upload
+                $newHallPanoramaImg = handleFileUpload(
+                    $_FILES["editHallPanoramaImage"],
+                    $primaryDir,
+                    $fallbackDir,
+                    $debugInfo,
+                    $errorMessage,
+                    $uploadOk
+                );
                 
-                // Make sure the directory is writable
-                if (!is_writable($targetDir) && $uploadOk == 1) {
-                    $debugInfo[] = "Directory not writable, attempting to set permissions...";
-                    chmod($targetDir, 0777);
-                    if (!is_writable($targetDir)) {
-                        $errorMessage = "Panorama directory is not writable. Please check server permissions.";
-                        $debugInfo[] = "Failed to make directory writable";
-                        $uploadOk = 0;
-                    } else {
-                        $debugInfo[] = "Directory permissions updated successfully";
-                    }
-                } else if ($uploadOk == 1) {
-                    $debugInfo[] = "Directory is writable";
-                }
-                
-                // Clean the filename to remove problematic characters
-                $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
-                $fileName = preg_replace('/[^a-zA-Z0-9_.-]/', '_', $fileName); // Replace problematic chars with underscore
-                $uniqueFileName = uniqid() . "_" . $fileName;
-                $targetFilePath = $targetDir . $uniqueFileName;
-                $debugInfo[] = "Target file path: " . $targetFilePath;
-                
-                $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
-                $debugInfo[] = "File type: " . $fileType;
-                
-                $check = @getimagesize($_FILES["editHallPanoramaImage"]["tmp_name"]);
-                if($check === false) { 
-                    $errorMessage = "New panorama file is not a valid image."; 
-                    $debugInfo[] = "File validation failed: Not a valid image";
-                    $uploadOk = 0; 
-                } else {
-                    $debugInfo[] = "File validation passed: Valid image";
-                }
-                
-                if($_FILES["editHallPanoramaImage"]["size"] > 15000000) { 
-                    $errorMessage = "Sorry, new panorama file is too large (max 15MB)."; 
-                    $debugInfo[] = "File validation failed: File too large (" . $_FILES["editHallPanoramaImage"]["size"] . " bytes)";
-                    $uploadOk = 0; 
-                }
-                
-                if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { 
-                    $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for new panoramas."; 
-                    $debugInfo[] = "File validation failed: Invalid file type";
-                    $uploadOk = 0; 
-                }
-
-                if ($uploadOk == 0) {
-                    // Error already set
-                    $debugInfo[] = "Upload aborted due to validation errors";
-                } else {
-                    $debugInfo[] = "Attempting to move uploaded file...";
-                    // Try direct copy as a fallback if move_uploaded_file fails
-                    if (move_uploaded_file($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
-                        $debugInfo[] = "File moved successfully using move_uploaded_file()";
-                        $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
+                // If upload was successful, delete the old file
+                if ($uploadOk == 1 && !empty($newHallPanoramaImg) && !empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg) {
+                    $debugInfo[] = "Upload successful, attempting to delete old file: ../" . $currentHallPanoramaImg;
+                    
+                    // Only delete if it's in a safe directory
+                    if ((strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 || strpos($currentHallPanoramaImg, 'uploads/panoramas/') === 0) 
+                        && file_exists("../" . $currentHallPanoramaImg)) {
                         
-                        // Delete old panorama file if different and exists
-                        if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
-                            if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
-                                $debugInfo[] = "Attempting to delete old file: ../" . $currentHallPanoramaImg;
-                                if (unlink("../" . $currentHallPanoramaImg)) {
-                                    $debugInfo[] = "Old file deleted successfully";
-                                } else {
-                                    $debugInfo[] = "Failed to delete old file: " . error_get_last()['message'];
-                                }
-                            }
-                        }
-                    } else {
-                        $moveError = error_get_last();
-                        $debugInfo[] = "move_uploaded_file() failed: " . ($moveError ? $moveError['message'] : 'Unknown error');
-                        
-                        // Try alternative method - direct copy
-                        $debugInfo[] = "Attempting alternative copy method...";
-                        if (copy($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
-                            $debugInfo[] = "File copied successfully using copy()";
-                            $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
-                            
-                            // Delete old panorama file if different and exists
-                            if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
-                                if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
-                                    $debugInfo[] = "Attempting to delete old file: ../" . $currentHallPanoramaImg;
-                                    if (unlink("../" . $currentHallPanoramaImg)) {
-                                        $debugInfo[] = "Old file deleted successfully";
-                                    } else {
-                                        $debugInfo[] = "Failed to delete old file: " . error_get_last()['message'];
-                                    }
-                                }
-                            }
+                        if (unlink("../" . $currentHallPanoramaImg)) {
+                            $debugInfo[] = "Old file deleted successfully";
                         } else {
-                            $copyError = error_get_last();
-                            $debugInfo[] = "copy() failed: " . ($copyError ? $copyError['message'] : 'Unknown error');
-                            $errorMessage = "Failed to upload file. Please contact administrator.";
-                            $uploadOk = 0;
+                            $debugInfo[] = "Failed to delete old file: " . error_get_last()['message'];
                         }
+                    } else {
+                        $debugInfo[] = "Old file not found or not in a safe directory: " . $currentHallPanoramaImg;
                     }
                 }
                 

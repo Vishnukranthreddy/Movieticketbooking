@@ -112,8 +112,22 @@ if ($theaterId > 0) {
             // Handle panorama image upload if provided
             if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
                 $targetDir = "../img/panoramas/"; // Path relative to admin/ folder
-                if (!is_dir($targetDir)) {
-                    mkdir($targetDir, 0755, true);
+                
+                // Ensure the directory exists with proper permissions
+                if (!file_exists($targetDir)) {
+                    if (!mkdir($targetDir, 0777, true)) {
+                        $errorMessage = "Failed to create panorama directory. Please check server permissions.";
+                        $uploadOk = 0;
+                    }
+                }
+                
+                // Make sure the directory is writable
+                if (!is_writable($targetDir) && $uploadOk == 1) {
+                    chmod($targetDir, 0777);
+                    if (!is_writable($targetDir)) {
+                        $errorMessage = "Panorama directory is not writable. Please check server permissions.";
+                        $uploadOk = 0;
+                    }
                 }
 
                 $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
@@ -132,7 +146,7 @@ if ($theaterId > 0) {
                     if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
                         $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
                     } else {
-                        $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
+                        $errorMessage = "Sorry, there was an error uploading the panorama file to the server. Error: " . error_get_last()['message'];
                         $uploadOk = 0;
                     }
                 }
@@ -179,7 +193,24 @@ if ($theaterId > 0) {
             // Handle new panorama image upload for update
             if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
                 $targetDir = "../img/panoramas/";
-                if (!is_dir($targetDir)) { mkdir($targetDir, 0755, true); }
+                
+                // Ensure the directory exists with proper permissions
+                if (!file_exists($targetDir)) {
+                    if (!mkdir($targetDir, 0777, true)) {
+                        $errorMessage = "Failed to create panorama directory. Please check server permissions.";
+                        $uploadOk = 0;
+                    }
+                }
+                
+                // Make sure the directory is writable
+                if (!is_writable($targetDir) && $uploadOk == 1) {
+                    chmod($targetDir, 0777);
+                    if (!is_writable($targetDir)) {
+                        $errorMessage = "Panorama directory is not writable. Please check server permissions.";
+                        $uploadOk = 0;
+                    }
+                }
+                
                 $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
                 $uniqueFileName = uniqid() . "_" . $fileName;
                 $targetFilePath = $targetDir . $uniqueFileName;
@@ -202,7 +233,7 @@ if ($theaterId > 0) {
                             }
                         }
                     } else {
-                        $errorMessage = "Error uploading new panorama file for update.";
+                        $errorMessage = "Error uploading new panorama file for update. Error: " . error_get_last()['message'];
                         $uploadOk = 0;
                     }
                 }

@@ -226,6 +226,43 @@ function handleFileUpload($file, $primaryDir, $fallbackDir, &$debugInfo, &$error
                 if (!is_writable($fallbackDir)) {
                     $debugInfo[] = "Fallback directory not writable, attempting to set permissions";
                     @chmod($fallbackDir, 0777);
+                    
+                    // Try system commands if PHP chmod fails
+                    if (!is_writable($fallbackDir)) {
+                        $debugInfo[] = "PHP chmod failed, trying system commands...";
+                        
+                        // On Windows
+                        if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+                            // Remove read-only attribute
+                            $cmd = 'attrib -R "' . $fallbackDir . '" /S /D';
+                            $debugInfo[] = "Running Windows command: $cmd";
+                            @exec($cmd, $output, $returnVar);
+                            $debugInfo[] = "Command result: " . ($returnVar === 0 ? "Success" : "Failed (code: $returnVar)");
+                            
+                            // Grant full permissions to Everyone
+                            $cmd = 'icacls "' . $fallbackDir . '" /grant Everyone:(OI)(CI)F';
+                            $debugInfo[] = "Running Windows command: $cmd";
+                            @exec($cmd, $output, $returnVar);
+                            $debugInfo[] = "Command result: " . ($returnVar === 0 ? "Success" : "Failed (code: $returnVar)");
+                        } else {
+                            // On Linux/Unix
+                            $cmd = 'chmod -R 777 "' . $fallbackDir . '"';
+                            $debugInfo[] = "Running Unix command: $cmd";
+                            @exec($cmd, $output, $returnVar);
+                            $debugInfo[] = "Command result: " . ($returnVar === 0 ? "Success" : "Failed (code: $returnVar)");
+                        }
+                    }
+                }
+                
+                // Try to create a test file to verify write permissions
+                $testFile = $fallbackDir . 'test_' . time() . '.txt';
+                $debugInfo[] = "Testing write permissions with test file: " . $testFile;
+                if (@file_put_contents($testFile, 'test')) {
+                    $debugInfo[] = "Test file created successfully, directory is writable";
+                    @unlink($testFile); // Clean up test file
+                } else {
+                    $writeError = error_get_last();
+                    $debugInfo[] = "Failed to create test file: " . ($writeError ? $writeError['message'] : 'Unknown error');
                 }
                 
                 if (copy($targetFilePath, $finalPath)) {
@@ -237,9 +274,35 @@ function handleFileUpload($file, $primaryDir, $fallbackDir, &$debugInfo, &$error
                     $copyError = error_get_last();
                     $debugInfo[] = "Failed to copy to fallback directory: " . ($copyError ? $copyError['message'] : 'Unknown error');
                     
-                    // Just use the temp file as is
-                    $debugInfo[] = "Using temp file as final destination";
-                    return $relativePath . $uniqueFileName;
+                    // Try one more approach - use system temp directory as final destination
+                    $tempFinalDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'movie_uploads' . DIRECTORY_SEPARATOR;
+                    $debugInfo[] = "Attempting to use system temp directory as final destination: " . $tempFinalDir;
+                    
+                    // Create the temp directory if it doesn't exist
+                    if (!file_exists($tempFinalDir)) {
+                        $debugInfo[] = "Creating temp final directory...";
+                        if (!mkdir($tempFinalDir, 0777, true)) {
+                            $debugInfo[] = "Failed to create temp final directory: " . error_get_last()['message'];
+                        }
+                    }
+                    
+                    $tempFinalPath = $tempFinalDir . $uniqueFileName;
+                    if (copy($targetFilePath, $tempFinalPath)) {
+                        $debugInfo[] = "File copied successfully to system temp directory";
+                        // Delete the original temp file
+                        @unlink($targetFilePath);
+                        
+                        // Store the full path in the database for later processing
+                        // We'll use a special prefix to indicate this is a temp file that needs to be moved
+                        return "TEMP:" . $tempFinalPath;
+                    } else {
+                        $copyError = error_get_last();
+                        $debugInfo[] = "Failed to copy to system temp directory: " . ($copyError ? $copyError['message'] : 'Unknown error');
+                        
+                        // Just use the temp file as is as a last resort
+                        $debugInfo[] = "Using original temp file as final destination";
+                        return "TEMP:" . $targetFilePath;
+                    }
                 }
             }
         } else {
@@ -288,6 +351,43 @@ function handleFileUpload($file, $primaryDir, $fallbackDir, &$debugInfo, &$error
                     if (!is_writable($fallbackDir)) {
                         $debugInfo[] = "Fallback directory not writable, attempting to set permissions";
                         @chmod($fallbackDir, 0777);
+                        
+                        // Try system commands if PHP chmod fails
+                        if (!is_writable($fallbackDir)) {
+                            $debugInfo[] = "PHP chmod failed, trying system commands...";
+                            
+                            // On Windows
+                            if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+                                // Remove read-only attribute
+                                $cmd = 'attrib -R "' . $fallbackDir . '" /S /D';
+                                $debugInfo[] = "Running Windows command: $cmd";
+                                @exec($cmd, $output, $returnVar);
+                                $debugInfo[] = "Command result: " . ($returnVar === 0 ? "Success" : "Failed (code: $returnVar)");
+                                
+                                // Grant full permissions to Everyone
+                                $cmd = 'icacls "' . $fallbackDir . '" /grant Everyone:(OI)(CI)F';
+                                $debugInfo[] = "Running Windows command: $cmd";
+                                @exec($cmd, $output, $returnVar);
+                                $debugInfo[] = "Command result: " . ($returnVar === 0 ? "Success" : "Failed (code: $returnVar)");
+                            } else {
+                                // On Linux/Unix
+                                $cmd = 'chmod -R 777 "' . $fallbackDir . '"';
+                                $debugInfo[] = "Running Unix command: $cmd";
+                                @exec($cmd, $output, $returnVar);
+                                $debugInfo[] = "Command result: " . ($returnVar === 0 ? "Success" : "Failed (code: $returnVar)");
+                            }
+                        }
+                    }
+                    
+                    // Try to create a test file to verify write permissions
+                    $testFile = $fallbackDir . 'test_' . time() . '.txt';
+                    $debugInfo[] = "Testing write permissions with test file: " . $testFile;
+                    if (@file_put_contents($testFile, 'test')) {
+                        $debugInfo[] = "Test file created successfully, directory is writable";
+                        @unlink($testFile); // Clean up test file
+                    } else {
+                        $writeError = error_get_last();
+                        $debugInfo[] = "Failed to create test file: " . ($writeError ? $writeError['message'] : 'Unknown error');
                     }
                     
                     if (copy($targetFilePath, $finalPath)) {
@@ -299,9 +399,35 @@ function handleFileUpload($file, $primaryDir, $fallbackDir, &$debugInfo, &$error
                         $copyError = error_get_last();
                         $debugInfo[] = "Failed to copy to fallback directory: " . ($copyError ? $copyError['message'] : 'Unknown error');
                         
-                        // Just use the temp file as is
-                        $debugInfo[] = "Using temp file as final destination";
-                        return $relativePath . $uniqueFileName;
+                        // Try one more approach - use system temp directory as final destination
+                        $tempFinalDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'movie_uploads' . DIRECTORY_SEPARATOR;
+                        $debugInfo[] = "Attempting to use system temp directory as final destination: " . $tempFinalDir;
+                        
+                        // Create the temp directory if it doesn't exist
+                        if (!file_exists($tempFinalDir)) {
+                            $debugInfo[] = "Creating temp final directory...";
+                            if (!mkdir($tempFinalDir, 0777, true)) {
+                                $debugInfo[] = "Failed to create temp final directory: " . error_get_last()['message'];
+                            }
+                        }
+                        
+                        $tempFinalPath = $tempFinalDir . $uniqueFileName;
+                        if (copy($targetFilePath, $tempFinalPath)) {
+                            $debugInfo[] = "File copied successfully to system temp directory";
+                            // Delete the original temp file
+                            @unlink($targetFilePath);
+                            
+                            // Store the full path in the database for later processing
+                            // We'll use a special prefix to indicate this is a temp file that needs to be moved
+                            return "TEMP:" . $tempFinalPath;
+                        } else {
+                            $copyError = error_get_last();
+                            $debugInfo[] = "Failed to copy to system temp directory: " . ($copyError ? $copyError['message'] : 'Unknown error');
+                            
+                            // Just use the temp file as is as a last resort
+                            $debugInfo[] = "Using original temp file as final destination";
+                            return "TEMP:" . $targetFilePath;
+                        }
                     }
                 }
             } else {

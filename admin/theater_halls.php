@@ -138,6 +138,25 @@ if ($theaterId > 0) {
                 }
                 file_put_contents($logFile, date('Y-m-d H:i:s') . " - Upload Debug:\n" . implode("\n", $debugInfo) . "\n\n", FILE_APPEND);
                 
+                // Handle special TEMP: prefix for files stored in temporary locations
+                if ($hallPanoramaImg && strpos($hallPanoramaImg, 'TEMP:') === 0) {
+                    $tempFilePath = substr($hallPanoramaImg, 5); // Remove 'TEMP:' prefix
+                    $debugInfo[] = "File is in temporary location: " . $tempFilePath;
+                    
+                    // Store the temp path in a session variable for later processing
+                    if (!isset($_SESSION['temp_files'])) {
+                        $_SESSION['temp_files'] = [];
+                    }
+                    $_SESSION['temp_files'][] = $tempFilePath;
+                    
+                    // Use a placeholder path for database storage
+                    $hallPanoramaImg = "uploads/panoramas/" . basename($tempFilePath);
+                    $debugInfo[] = "Using placeholder path for database: " . $hallPanoramaImg;
+                    
+                    // Add a note to the log
+                    file_put_contents($logFile, date('Y-m-d H:i:s') . " - TEMP FILE NOTICE: Original temp path: " . $tempFilePath . ", DB path: " . $hallPanoramaImg . "\n", FILE_APPEND);
+                }
+                
                 // If upload failed, include debug info in error message for admin
                 if ($uploadOk == 0 && empty($hallPanoramaImg)) {
                     $errorMessage .= " Technical details have been logged for administrator review.";
@@ -200,6 +219,25 @@ if ($theaterId > 0) {
                     $errorMessage,
                     $uploadOk
                 );
+                
+                // Handle special TEMP: prefix for files stored in temporary locations
+                if ($newHallPanoramaImg && strpos($newHallPanoramaImg, 'TEMP:') === 0) {
+                    $tempFilePath = substr($newHallPanoramaImg, 5); // Remove 'TEMP:' prefix
+                    $debugInfo[] = "File is in temporary location: " . $tempFilePath;
+                    
+                    // Store the temp path in a session variable for later processing
+                    if (!isset($_SESSION['temp_files'])) {
+                        $_SESSION['temp_files'] = [];
+                    }
+                    $_SESSION['temp_files'][] = $tempFilePath;
+                    
+                    // Use a placeholder path for database storage
+                    $newHallPanoramaImg = "uploads/panoramas/" . basename($tempFilePath);
+                    $debugInfo[] = "Using placeholder path for database: " . $newHallPanoramaImg;
+                    
+                    // Add a note to the log
+                    file_put_contents($logFile, date('Y-m-d H:i:s') . " - TEMP FILE NOTICE: Original temp path: " . $tempFilePath . ", DB path: " . $newHallPanoramaImg . "\n", FILE_APPEND);
+                }
                 
                 // If upload was successful, delete the old file
                 if ($uploadOk == 1 && !empty($newHallPanoramaImg) && !empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg) {

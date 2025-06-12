@@ -1,148 +1,93 @@
 <?php
-echo "<h1>Panorama Files Check</h1>";
+/**
+ * Check Panorama Directories
+ * This script checks the status of panorama directories and displays information
+ */
 
-// Function to check directory and list files
+// Define directories to check
+$directories = [
+    'img/panoramas',
+    'uploads/panoramas',
+    'logs'
+];
+
+// Function to check directory
 function checkDirectory($dir) {
-    echo "<h2>Checking directory: $dir</h2>";
+    echo "<h3>Checking directory: $dir</h3>";
     
-    if (!file_exists($dir)) {
-        echo "<p style='color:red'>Directory does not exist!</p>";
-        return;
-    }
+    $fullPath = __DIR__ . '/' . $dir;
     
-    if (!is_readable($dir)) {
-        echo "<p style='color:red'>Directory is not readable!</p>";
-        return;
-    }
-    
-    echo "<p style='color:green'>Directory exists and is readable.</p>";
-    
-    // List files in the directory
-    $files = scandir($dir);
-    if (count($files) <= 2) { // Only . and .. entries
-        echo "<p>Directory is empty (no files).</p>";
+    // Check if directory exists
+    if (!file_exists($fullPath)) {
+        echo "Directory does not exist.<br>";
+        return false;
     } else {
-        echo "<table border='1'>";
-        echo "<tr><th>Filename</th><th>Size</th><th>Last Modified</th><th>Readable</th><th>Preview</th></tr>";
-        
-        foreach ($files as $file) {
-            if ($file != "." && $file != "..") {
-                $filePath = $dir . '/' . $file;
-                $fileSize = filesize($filePath);
-                $lastModified = date("Y-m-d H:i:s", filemtime($filePath));
-                $isReadable = is_readable($filePath) ? "Yes" : "No";
-                
-                echo "<tr>";
-                echo "<td>$file</td>";
-                echo "<td>$fileSize bytes</td>";
-                echo "<td>$lastModified</td>";
-                echo "<td>$isReadable</td>";
-                
-                // For image files, show a small preview
-                $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-                if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif'])) {
-                    $relativePath = str_replace($_SERVER['DOCUMENT_ROOT'], '', $filePath);
-                    echo "<td><img src='$relativePath' width='100' height='auto'></td>";
-                } else {
-                    echo "<td>Not an image</td>";
-                }
-                
-                echo "</tr>";
-            }
-        }
-        
-        echo "</table>";
+        echo "Directory exists.<br>";
     }
+    
+    // Check if directory is writable
+    if (!is_writable($fullPath)) {
+        echo "Directory is not writable.<br>";
+    } else {
+        echo "Directory is writable.<br>";
+    }
+    
+    // List files in directory
+    echo "<h4>Files in directory:</h4>";
+    $files = scandir($fullPath);
+    echo "<ul>";
+    foreach ($files as $file) {
+        if ($file != '.' && $file != '..') {
+            $filePath = $fullPath . '/' . $file;
+            echo "<li>" . $file;
+            echo " (Size: " . filesize($filePath) . " bytes";
+            echo ", Permissions: " . substr(sprintf('%o', fileperms($filePath)), -4);
+            echo ", Writable: " . (is_writable($filePath) ? 'Yes' : 'No') . ")";
+            echo "</li>";
+        }
+    }
+    echo "</ul>";
+    
+    return true;
 }
 
-// Check the main panoramas directory
-checkDirectory(__DIR__ . '/img/panoramas');
+// Display system information
+echo "<h2>System Information</h2>";
+echo "PHP Version: " . PHP_VERSION . "<br>";
+echo "OS: " . PHP_OS . "<br>";
+echo "Server Software: " . $_SERVER['SERVER_SOFTWARE'] . "<br>";
+echo "Current User: " . get_current_user() . "<br>";
+echo "Script Owner: " . fileowner(__FILE__) . "<br>";
+echo "Current Working Directory: " . getcwd() . "<br>";
+echo "Document Root: " . $_SERVER['DOCUMENT_ROOT'] . "<br>";
+echo "Script Path: " . __FILE__ . "<br>";
 
-// Check the fallback directory
-checkDirectory(__DIR__ . '/uploads/panoramas');
-
-// Check if the system temp directory is being used
-$tempDir = sys_get_temp_dir() . '/movie_uploads';
-if (file_exists($tempDir)) {
-    checkDirectory($tempDir);
-} else {
-    echo "<h2>Temp Directory: $tempDir</h2>";
-    echo "<p>Directory does not exist (not created yet).</p>";
+// Check each directory
+echo "<h2>Directory Checks</h2>";
+foreach ($directories as $dir) {
+    checkDirectory($dir);
+    echo "<hr>";
 }
 
-// Check for any panorama images in the database
-echo "<h2>Database Panorama Paths</h2>";
-
-// Database connection
-$host = "sql12.freesqldatabase.com";
-$username = "sql12784044";
-$password = "Whcw9IFzSV";
-$database = "sql12784044";
-$conn = new mysqli($host, $username, $password, $database);
-
-if ($conn->connect_error) {
-    echo "<p style='color:red'>Database connection failed: " . $conn->connect_error . "</p>";
+// Check for upload_debug.log file
+$logFile = __DIR__ . '/logs/upload_debug.log';
+echo "<h3>Checking for upload_debug.log file</h3>";
+if (file_exists($logFile)) {
+    echo "Log file exists.<br>";
+    echo "File size: " . filesize($logFile) . " bytes<br>";
+    echo "Permissions: " . substr(sprintf('%o', fileperms($logFile)), -4) . "<br>";
+    echo "Writable: " . (is_writable($logFile) ? 'Yes' : 'No') . "<br>";
+    
+    // Display last few lines of log file
+    echo "<h4>Last 10 lines of log file:</h4>";
+    $logContent = file($logFile);
+    $lastLines = array_slice($logContent, -10);
+    echo "<pre>";
+    foreach ($lastLines as $line) {
+        echo htmlspecialchars($line);
+    }
+    echo "</pre>";
 } else {
-    // Check theater halls
-    $result = $conn->query("SELECT hallID, hallName, hallPanoramaImg FROM theater_halls WHERE hallPanoramaImg IS NOT NULL");
-    if ($result) {
-        if ($result->num_rows > 0) {
-            echo "<h3>Hall Panoramas</h3>";
-            echo "<table border='1'>";
-            echo "<tr><th>Hall ID</th><th>Hall Name</th><th>Panorama Path</th><th>File Exists</th></tr>";
-            
-            while ($row = $result->fetch_assoc()) {
-                $panoramaPath = $row['hallPanoramaImg'];
-                $fullPath = __DIR__ . '/' . $panoramaPath;
-                $fileExists = file_exists($fullPath) ? "Yes" : "No";
-                $fileExistsColor = $fileExists == "Yes" ? "green" : "red";
-                
-                echo "<tr>";
-                echo "<td>" . $row['hallID'] . "</td>";
-                echo "<td>" . $row['hallName'] . "</td>";
-                echo "<td>" . $panoramaPath . "</td>";
-                echo "<td style='color:$fileExistsColor'>" . $fileExists . "</td>";
-                echo "</tr>";
-            }
-            
-            echo "</table>";
-        } else {
-            echo "<p>No hall panorama images found in database.</p>";
-        }
-    } else {
-        echo "<p style='color:red'>Error querying hall panoramas: " . $conn->error . "</p>";
-    }
-    
-    // Check theaters
-    $result = $conn->query("SELECT theaterID, theaterName, theaterPanoramaImg FROM theaters WHERE theaterPanoramaImg IS NOT NULL");
-    if ($result) {
-        if ($result->num_rows > 0) {
-            echo "<h3>Theater Panoramas</h3>";
-            echo "<table border='1'>";
-            echo "<tr><th>Theater ID</th><th>Theater Name</th><th>Panorama Path</th><th>File Exists</th></tr>";
-            
-            while ($row = $result->fetch_assoc()) {
-                $panoramaPath = $row['theaterPanoramaImg'];
-                $fullPath = __DIR__ . '/' . $panoramaPath;
-                $fileExists = file_exists($fullPath) ? "Yes" : "No";
-                $fileExistsColor = $fileExists == "Yes" ? "green" : "red";
-                
-                echo "<tr>";
-                echo "<td>" . $row['theaterID'] . "</td>";
-                echo "<td>" . $row['theaterName'] . "</td>";
-                echo "<td>" . $panoramaPath . "</td>";
-                echo "<td style='color:$fileExistsColor'>" . $fileExists . "</td>";
-                echo "</tr>";
-            }
-            
-            echo "</table>";
-        } else {
-            echo "<p>No theater panorama images found in database.</p>";
-        }
-    } else {
-        echo "<p style='color:red'>Error querying theater panoramas: " . $conn->error . "</p>";
-    }
-    
-    $conn->close();
+    echo "Log file does not exist.<br>";
 }
 ?>

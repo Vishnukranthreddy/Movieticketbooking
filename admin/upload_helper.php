@@ -214,6 +214,20 @@ function handleFileUpload($file, $primaryDir, $fallbackDir, &$debugInfo, &$error
                 $finalPath = $fallbackDir . $uniqueFileName;
                 $debugInfo[] = "Attempting to copy to fallback directory: " . $finalPath;
                 
+                // Check if fallback directory exists and is writable
+                if (!file_exists($fallbackDir)) {
+                    $debugInfo[] = "Fallback directory does not exist, creating: " . $fallbackDir;
+                    if (!mkdir($fallbackDir, 0777, true)) {
+                        $debugInfo[] = "Failed to create fallback directory: " . error_get_last()['message'];
+                    }
+                }
+                
+                // Ensure fallback directory is writable
+                if (!is_writable($fallbackDir)) {
+                    $debugInfo[] = "Fallback directory not writable, attempting to set permissions";
+                    @chmod($fallbackDir, 0777);
+                }
+                
                 if (copy($targetFilePath, $finalPath)) {
                     $debugInfo[] = "File copied successfully to fallback directory";
                     // Delete the temp file
@@ -261,6 +275,20 @@ function handleFileUpload($file, $primaryDir, $fallbackDir, &$debugInfo, &$error
                     // Try fallback directory
                     $finalPath = $fallbackDir . $uniqueFileName;
                     $debugInfo[] = "Attempting to copy to fallback directory: " . $finalPath;
+                    
+                    // Check if fallback directory exists and is writable
+                    if (!file_exists($fallbackDir)) {
+                        $debugInfo[] = "Fallback directory does not exist, creating: " . $fallbackDir;
+                        if (!mkdir($fallbackDir, 0777, true)) {
+                            $debugInfo[] = "Failed to create fallback directory: " . error_get_last()['message'];
+                        }
+                    }
+                    
+                    // Ensure fallback directory is writable
+                    if (!is_writable($fallbackDir)) {
+                        $debugInfo[] = "Fallback directory not writable, attempting to set permissions";
+                        @chmod($fallbackDir, 0777);
+                    }
                     
                     if (copy($targetFilePath, $finalPath)) {
                         $debugInfo[] = "File copied successfully to fallback directory";

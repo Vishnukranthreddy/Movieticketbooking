@@ -7,9 +7,6 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
-// Include upload helper functions
-require_once('upload_helper.php');
-
 // Database connection
 $host = "sql12.freesqldatabase.com";
 $username = "sql12784044";
@@ -114,52 +111,30 @@ if ($theaterId > 0) {
 
             // Handle panorama image upload if provided
             if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                // Initialize debug array
-                $debugInfo = [];
-                
-                // Set up primary and fallback directories
-                $primaryDir = realpath("..") . "/img/panoramas/";
-                $fallbackDir = realpath("..") . "/uploads/panoramas/";
-                
-                // Use our helper function to handle the upload
-                $hallPanoramaImg = handleFileUpload(
-                    $_FILES["hallPanoramaImage"],
-                    $primaryDir,
-                    $fallbackDir,
-                    $debugInfo,
-                    $errorMessage,
-                    $uploadOk
-                );
-                
-                // Log debug information to a file for troubleshooting
-                $logFile = "../logs/upload_debug.log";
-                if (!file_exists("../logs/")) {
-                    mkdir("../logs/", 0777, true);
+                $targetDir = "../img/panoramas/"; // Path relative to admin/ folder
+                if (!is_dir($targetDir)) {
+                    mkdir($targetDir, 0755, true);
                 }
-                file_put_contents($logFile, date('Y-m-d H:i:s') . " - Upload Debug:\n" . implode("\n", $debugInfo) . "\n\n", FILE_APPEND);
+
+                $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
+                $uniqueFileName = uniqid() . "_" . $fileName;
+                $targetFilePath = $targetDir . $uniqueFileName;
+                $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
                 
-                // Handle special TEMP: prefix for files stored in temporary locations
-                if ($hallPanoramaImg && strpos($hallPanoramaImg, 'TEMP:') === 0) {
-                    $tempFilePath = substr($hallPanoramaImg, 5); // Remove 'TEMP:' prefix
-                    $debugInfo[] = "File is in temporary location: " . $tempFilePath;
-                    
-                    // Store the temp path in a session variable for later processing
-                    if (!isset($_SESSION['temp_files'])) {
-                        $_SESSION['temp_files'] = [];
+                $check = @getimagesize($_FILES["hallPanoramaImage"]["tmp_name"]);
+                if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
+                if($_FILES["hallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; }
+                if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
+
+                if ($uploadOk == 0) {
+                    // Error message already set
+                } else {
+                    if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                        $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
+                    } else {
+                        $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
+                        $uploadOk = 0;
                     }
-                    $_SESSION['temp_files'][] = $tempFilePath;
-                    
-                    // Use a placeholder path for database storage
-                    $hallPanoramaImg = "uploads/panoramas/" . basename($tempFilePath);
-                    $debugInfo[] = "Using placeholder path for database: " . $hallPanoramaImg;
-                    
-                    // Add a note to the log
-                    file_put_contents($logFile, date('Y-m-d H:i:s') . " - TEMP FILE NOTICE: Original temp path: " . $tempFilePath . ", DB path: " . $hallPanoramaImg . "\n", FILE_APPEND);
-                }
-                
-                // If upload failed, include debug info in error message for admin
-                if ($uploadOk == 0 && empty($hallPanoramaImg)) {
-                    $errorMessage .= " Technical details have been logged for administrator review.";
                 }
             } else if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
                 // Handle other potential upload errors if a file was selected but had an error
@@ -203,70 +178,33 @@ if ($theaterId > 0) {
 
             // Handle new panorama image upload for update
             if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                // Initialize debug array
-                $debugInfo = [];
-                
-                // Set up primary and fallback directories
-                $primaryDir = realpath("..") . "/img/panoramas/";
-                $fallbackDir = realpath("..") . "/uploads/panoramas/";
-                
-                // Use our helper function to handle the upload
-                $newHallPanoramaImg = handleFileUpload(
-                    $_FILES["editHallPanoramaImage"],
-                    $primaryDir,
-                    $fallbackDir,
-                    $debugInfo,
-                    $errorMessage,
-                    $uploadOk
-                );
-                
-                // Handle special TEMP: prefix for files stored in temporary locations
-                if ($newHallPanoramaImg && strpos($newHallPanoramaImg, 'TEMP:') === 0) {
-                    $tempFilePath = substr($newHallPanoramaImg, 5); // Remove 'TEMP:' prefix
-                    $debugInfo[] = "File is in temporary location: " . $tempFilePath;
-                    
-                    // Store the temp path in a session variable for later processing
-                    if (!isset($_SESSION['temp_files'])) {
-                        $_SESSION['temp_files'] = [];
-                    }
-                    $_SESSION['temp_files'][] = $tempFilePath;
-                    
-                    // Use a placeholder path for database storage
-                    $newHallPanoramaImg = "uploads/panoramas/" . basename($tempFilePath);
-                    $debugInfo[] = "Using placeholder path for database: " . $newHallPanoramaImg;
-                    
-                    // Add a note to the log
-                    file_put_contents($logFile, date('Y-m-d H:i:s') . " - TEMP FILE NOTICE: Original temp path: " . $tempFilePath . ", DB path: " . $newHallPanoramaImg . "\n", FILE_APPEND);
-                }
-                
-                // If upload was successful, delete the old file
-                if ($uploadOk == 1 && !empty($newHallPanoramaImg) && !empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg) {
-                    $debugInfo[] = "Upload successful, attempting to delete old file: ../" . $currentHallPanoramaImg;
-                    
-                    // Only delete if it's in a safe directory
-                    if ((strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 || strpos($currentHallPanoramaImg, 'uploads/panoramas/') === 0) 
-                        && file_exists("../" . $currentHallPanoramaImg)) {
-                        
-                        if (unlink("../" . $currentHallPanoramaImg)) {
-                            $debugInfo[] = "Old file deleted successfully";
-                        } else {
-                            $debugInfo[] = "Failed to delete old file: " . error_get_last()['message'];
+                $targetDir = "../img/panoramas/";
+                if (!is_dir($targetDir)) { mkdir($targetDir, 0755, true); }
+                $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
+                $uniqueFileName = uniqid() . "_" . $fileName;
+                $targetFilePath = $targetDir . $uniqueFileName;
+                $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+
+                $check = @getimagesize($_FILES["editHallPanoramaImage"]["tmp_name"]);
+                if($check === false) { $errorMessage = "New panorama file is not a valid image."; $uploadOk = 0; }
+                if($_FILES["editHallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, new panorama file is too large (max 15MB)."; $uploadOk = 0; }
+                if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for new panoramas."; $uploadOk = 0; }
+
+                if ($uploadOk == 0) {
+                    // Error already set
+                } else {
+                    if (move_uploaded_file($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                        $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
+                        // Delete old panorama file if different and exists
+                        if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
+                            if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
+                                unlink("../" . $currentHallPanoramaImg);
+                            }
                         }
                     } else {
-                        $debugInfo[] = "Old file not found or not in a safe directory: " . $currentHallPanoramaImg;
+                        $errorMessage = "Error uploading new panorama file for update.";
+                        $uploadOk = 0;
                     }
-                }
-                
-                // Log debug information to a file for troubleshooting
-                $logFile = "../logs/upload_debug.log";
-                if (!file_exists("../logs/")) {
-                    mkdir("../logs/", 0777, true);
-                }
-                file_put_contents($logFile, date('Y-m-d H:i:s') . " - Edit Upload Debug:\n" . implode("\n", $debugInfo) . "\n\n", FILE_APPEND);
-                
-                // If upload failed, include debug info in error message for admin
-                if ($uploadOk == 0 && $newHallPanoramaImg == $currentHallPanoramaImg) {
-                    $errorMessage .= " Technical details have been logged for administrator review.";
                 }
             } else if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
                 $errorMessage = "File upload error for new panorama: " . $_FILES["editHallPanoramaImage"]["error"];

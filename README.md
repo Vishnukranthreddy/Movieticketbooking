@@ -28,7 +28,6 @@ To access and use this project:
 - Database: MySQL
 - Containerization: Docker, Docker Compose
 - Deployment: Render.com
-- 📷 Panorama: [Marzipano / panolens.min.js / Your chosen library]
 
 
 ### 🎥 Panorama View

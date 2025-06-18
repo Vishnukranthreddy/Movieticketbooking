@@ -14,14 +14,6 @@ To access and use this project:
    cd Movieticketbooking
 
 
-your-repository-name/
-├── apache-config.conf
-├── docker-compose.yml
-├── .env.example
-├── src/
-├── README.md
-└── ...
-
 ## 🌟 Features
 
 - 🎟️ Book movie tickets online

@@ -12,8 +12,8 @@ SET time_zone = "+00:00";
 --
 -- Create Database if not exists
 --
-CREATE DATABASE IF NOT EXISTS `sql12784044` DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci;
-USE `sql12784044`;
+CREATE DATABASE IF NOT EXISTS `movie_db` DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci;
+USE `movie_db`;
 
 -- --------------------------------------------------------
 

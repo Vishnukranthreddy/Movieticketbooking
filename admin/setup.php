@@ -1,9 +1,9 @@
 <?php
 // Database connection
-$host = "sql12.freesqldatabase.com";
-$username = "sql12784044";
-$password = "Whcw9IFzSV";
-$database = "sql12784044";
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";;
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

@@ -1,45 +1,44 @@
-# Movie Ticket Booking System
+# 🎬 Movie Ticket Booking System
 
-A web application for booking movie tickets online.
+A full-stack web application for booking movie tickets online. This project is containerized with Docker and can be deployed locally or on Render.com.
 
-## Deployment Instructions
+---
 
-### Prerequisites
-- Docker and Docker Compose installed
-- MySQL database (default port: 3306)
+## 📁 Repository Access
 
-### Configuration
-1. Create a `.env` file in the root directory with the following content:
-```
-DB_HOST=your_database_host
-DB_PORT=3306
-DB_USERNAME=your_database_username
-DB_PASSWORD=your_database_password
-DB_DATABASE=your_database_name
-```
+To access and use this project:
 
-2. Make sure the `apache-config.conf` file exists in the root directory.
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/Vishnukranthreddy/Movieticketbooking.git
+   cd Movieticketbooking
 
-### Deployment with Docker
-1. Build and start the containers:
-```
-docker-compose up -d
-```
 
-2. Access the application at http://localhost
+your-repository-name/
+├── apache-config.conf
+├── docker-compose.yml
+├── .env.example
+├── src/
+├── README.md
+└── ...
 
-### Deployment on Render.com
-1. Connect your GitHub repository to Render.com
-2. Create a new Web Service
-3. Select "Docker" as the environment
-4. Set the following environment variables:
-   - DB_HOST: your_database_host
-   - DB_PORT: 3306
-   - DB_USERNAME: your_database_username
-   - DB_PASSWORD: your_database_password
-   - DB_DATABASE: your_database_name
-5. Deploy the application
+## 🌟 Features
 
-## Database
-The application uses MySQL on port 3306. Make sure this port is open and accessible from your deployment environment.
+- 🎟️ Book movie tickets online
+- 📍 Select theaters and show timings
+- 🧾 Manage bookings with confirmation
+- 🖼️ **Panoramic Theater View** – Explore the seating layout using interactive panoramas for an immersive seat selection experience
 
+## 🛠️ Tech Stack
+
+- Frontend: HTML, CSS, JavaScript
+- Backend: PHP 
+- Database: MySQL
+- Containerization: Docker, Docker Compose
+- Deployment: Render.com
+- 📷 Panorama: [Marzipano / panolens.min.js / Your chosen library]
+
+
+### 🎥 Panorama View
+[![Panorama View Example](./img/panoramas/pvr_lobby.jpg)]
+(https://vishnukranthreddy.github.io/panoramas/)

@@ -8,10 +8,10 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // Database connection
-$host = "sql12.freesqldatabase.com";
-$username = "sql12784044";
-$password = "Whcw9IFzSV";
-$database = "sql12784044"; // Ensured to be movie_db
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

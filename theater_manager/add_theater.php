@@ -8,7 +8,7 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
 }
 
 // Database connection
-$host = "dpg-d1gk4s7gi27c73brav8g-a";
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
 $username = "showtime_select_user";
 $password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
 $database = "showtime_select"; // Ensured to be movie_db
@@ -450,7 +450,7 @@ Here is the updated `user/index.php`:
 session_start();
 
 // Database connection
-$host = "dpg-d1gk4s7gi27c73brav8g-a";
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
 $username = "showtime_select_user";
 $password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
 $database = "showtime_select"; // Ensured to be movie_db

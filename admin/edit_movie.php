@@ -15,7 +15,7 @@ if (!isset($_SESSION['admin_id']) || !isset($_SESSION['admin_role']) || $_SESSIO
 }
 
 // Database connection
-$host = "dpg-d1gk4s7gi27c73brav8g-a";
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
 $username = "showtime_select_user";
 $password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
 $database = "showtime_select"; // Ensured to be movie_db

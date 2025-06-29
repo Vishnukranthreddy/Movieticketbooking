@@ -31,6 +31,5 @@ To access and use this project:
 
 
 ### 🎥 Panorama View
-[![Panorama View Example](./img/panoramas/pvr_lobby.jpg)](https://vishnukranthreddy.github.io/panoramas/)
-
-> Click the image above to experience the interactive panoramic theater view.
+[![Panorama View Example](./img/panoramas/pvr_lobby.jpg)]
+(https://vishnukranthreddy.github.io/panoramas/)

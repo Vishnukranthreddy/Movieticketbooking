@@ -9,10 +9,10 @@ if (!isset($_SESSION['admin_id'])) {
 }
 
 // Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";; // Ensured to be movie_db
+$host = "dpg-d1gk4s7gi27c73brav8g-a";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select"; // Ensured to be movie_db
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

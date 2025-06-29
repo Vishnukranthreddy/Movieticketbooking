@@ -14,14 +14,6 @@ To access and use this project:
    cd Movieticketbooking
 
 
-your-repository-name/
-├── apache-config.conf
-├── docker-compose.yml
-├── .env.example
-├── src/
-├── README.md
-└── ...
-
 ## 🌟 Features
 
 - 🎟️ Book movie tickets online
@@ -36,9 +28,9 @@ your-repository-name/
 - Database: MySQL
 - Containerization: Docker, Docker Compose
 - Deployment: Render.com
-- 📷 Panorama: [Marzipano / panolens.min.js / Your chosen library]
 
 
 ### 🎥 Panorama View
-[![Panorama View Example](./img/panoramas/pvr_lobby.jpg)]
-(https://vishnukranthreddy.github.io/panoramas/)
+[![Panorama View Example](./img/panoramas/pvr_lobby.jpg)](https://vishnukranthreddy.github.io/panoramas/)
+
+> Click the image above to experience the interactive panoramic theater view.

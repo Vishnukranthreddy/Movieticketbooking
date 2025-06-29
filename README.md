@@ -34,7 +34,3 @@ To access and use this project:
 [![Panorama View Example](./img/panoramas/pvr_lobby.jpg)](https://vishnukranthreddy.github.io/panoramas/)
 
 > Click the image above to experience the interactive panoramic theater view.
-<<<<<<< HEAD
-=======
-
->>>>>>> e3207ef067701d163cf34cb0282796988ac16c97

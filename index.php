@@ -1,16 +1,8 @@
 <?php
 session_start();
 
-// Database connection
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$conn = new mysqli($host, $username, $password, $database);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+// Include database configuration
+require_once 'config/database.php';
 
 // Get featured movies for display (limit to 6 for homepage)
 $featuredMoviesQuery = "
@@ -20,17 +12,21 @@ $featuredMoviesQuery = "
     ORDER BY m.movieRelDate DESC, m.movieTitle ASC
     LIMIT 6
 ";
-$featuredMovies = $conn->query($featuredMoviesQuery);
 
-// Check if the movie query failed
-if ($featuredMovies === false) {
-    die("Featured Movies Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($featuredMoviesQuery));
+try {
+    $featuredMovies = $conn->query($featuredMoviesQuery);
+} catch (PDOException $e) {
+    die("Featured Movies Query failed: " . $e->getMessage() . "<br>SQL: " . htmlspecialchars($featuredMoviesQuery));
 }
 
 // Get total movies count
 $totalMoviesQuery = "SELECT COUNT(*) as total FROM movietable";
-$totalMoviesResult = $conn->query($totalMoviesQuery);
-$totalMovies = $totalMoviesResult->fetch_assoc()['total'];
+try {
+    $totalMoviesResult = $conn->query($totalMoviesQuery);
+    $totalMovies = $totalMoviesResult->fetch()['total'];
+} catch (PDOException $e) {
+    die("Total Movies Query failed: " . $e->getMessage());
+}
 
 // Query for "Our Theaters" section
 // Fetch all active theaters, including their panorama image path
@@ -44,14 +40,14 @@ $theatersQuery = "
     WHERE theaterStatus = 'active'
     ORDER BY theaterName ASC
 ";
-$theaters = $conn->query($theatersQuery);
 
-// Check if the theater query failed
-if ($theaters === false) {
-    die("Theater Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($theatersQuery));
+try {
+    $theaters = $conn->query($theatersQuery);
+} catch (PDOException $e) {
+    die("Theater Query failed: " . $e->getMessage() . "<br>SQL: " . htmlspecialchars($theatersQuery));
 }
 
-$conn->close();
+$conn = null; // Close PDO connection
 ?>
 
 <!DOCTYPE html>
@@ -293,12 +289,12 @@ $conn->close();
     </section>
 
     <!-- Featured Movies Section -->
-    <?php if ($featuredMovies->num_rows > 0): ?>
+    <?php if ($featuredMovies && $featuredMovies->rowCount() > 0): ?>
     <section class="py-16">
         <div class="container mx-auto px-4">
             <h2 class="text-3xl font-bold text-center text-white mb-12">Featured Movies</h2>
             <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                <?php while ($movie = $featuredMovies->fetch_assoc()): ?>
+                <?php while ($movie = $featuredMovies->fetch()): ?>
                     <div class="card">
                         <img src="<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="card-image">
                         <div class="p-6">
@@ -318,12 +314,12 @@ $conn->close();
     <?php endif; ?>
 
     <!-- Our Theaters Section -->
-    <?php if ($theaters->num_rows > 0): ?>
+    <?php if ($theaters && $theaters->rowCount() > 0): ?>
     <section class="py-16">
         <div class="container mx-auto px-4">
             <h2 class="text-3xl font-bold text-center text-white mb-12">Our Theaters</h2>
             <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                <?php while ($theater = $theaters->fetch_assoc()): ?>
+                <?php while ($theater = $theaters->fetch()): ?>
                     <div class="theater-card">
                         <img src="<?php echo htmlspecialchars($theater['theaterPanoramaImg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theaterName']); ?>" class="theater-card-image">
                         <div class="p-6">

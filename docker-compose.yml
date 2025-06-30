@@ -6,11 +6,11 @@ services:
     ports:
       - "80:80"
     environment:
-      - DB_HOST=sql12.freesqldatabase.com
-      - DB_PORT=3306
-      - DB_USERNAME=sql12784044
-      - DB_PASSWORD=Whcw9IFzSV
-      - DB_DATABASE=sql12784044
+      - DB_HOST=dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com
+      - DB_PORT=33065432
+      - DB_USERNAME=showtime_select_user
+      - DB_PASSWORD=kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1
+      - DB_DATABASE=showtime_select
     volumes:
       - ./:/var/www/html
     restart: always

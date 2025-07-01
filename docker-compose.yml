@@ -7,7 +7,7 @@ services:
       - "80:80"
     environment:
       - DB_HOST=dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com
-      - DB_PORT=33065432
+      - DB_PORT=5432
       - DB_USERNAME=showtime_select_user
       - DB_PASSWORD=kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1
       - DB_DATABASE=showtime_select

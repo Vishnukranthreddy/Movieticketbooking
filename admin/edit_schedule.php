@@ -16,10 +16,10 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 $scheduleId = $_GET['id'];
 
 // Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensure consistent database
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select"; // Ensure consistent database
 $conn = new mysqli($host, $username, $password, $database);
 
 if ($conn->connect_error) {

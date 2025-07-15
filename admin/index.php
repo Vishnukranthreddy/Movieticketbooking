@@ -40,7 +40,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $input_password = $_POST["password"];
 
     // Use prepared statements to prevent SQL injection
-    $query = "SELECT \"adminID\", username, password, \"fullName\", \"roleID\" FROM admin_users WHERE username = $1 AND status = 'active' LIMIT 1";
+    // Changed column names to lowercase as per PostgreSQL's default behavior for unquoted identifiers
+    $query = "SELECT adminid, username, password, fullname, roleid FROM admin_users WHERE username = $1 AND status = 'active' LIMIT 1";
     $result = pg_query_params($conn, $query, array($input_username));
 
     if ($result && pg_num_rows($result) > 0) {
@@ -48,14 +49,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // Verify the password (assuming it's hashed in the database as per combined SQL)
         if (password_verify($input_password, $admin['password'])) {
             // Set session variables
-            $_SESSION['admin_id'] = $admin['adminID'];
+            // Accessing fetched data using lowercase keys
+            $_SESSION['admin_id'] = $admin['adminid'];
             $_SESSION['admin_username'] = $admin['username'];
-            $_SESSION['admin_name'] = $admin['fullName'];
-            $_SESSION['admin_role'] = $admin['roleID']; // IMPORTANT: Store the roleID
+            $_SESSION['admin_name'] = $admin['fullname'];
+            $_SESSION['admin_role'] = $admin['roleid']; // IMPORTANT: Store the roleID
 
             // Update last login time
-            $updateQuery = "UPDATE admin_users SET \"lastLogin\" = NOW() WHERE \"adminID\" = $1";
-            pg_query_params($conn, $updateQuery, array($admin['adminID']));
+            // Changed column name to lowercase
+            $updateQuery = "UPDATE admin_users SET lastlogin = NOW() WHERE adminid = $1";
+            pg_query_params($conn, $updateQuery, array($admin['adminid']));
 
             // Redirect based on role
             $_SESSION['just_logged_in'] = true; // Use this for welcome messages if needed

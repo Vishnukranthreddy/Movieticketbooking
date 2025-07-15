@@ -24,15 +24,15 @@ if (!$conn) {
 }
 
 // Get counts relevant to Content Manager
-// Note: PostgreSQL column names are case-sensitive if created with mixed case and quoted,
-// but often treated as lowercase if unquoted. Using double quotes for explicit case.
+// Using lowercase column names
 $movieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movietable");
 if (!$movieCountResult) {
     die("Error fetching movie count: " . pg_last_error($conn));
 }
 $movieCount = pg_fetch_assoc($movieCountResult)['count'];
 
-$activeMovieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movie_schedules WHERE \"scheduleStatus\" = 'active' AND \"showDate\" >= CURRENT_DATE");
+// Using lowercase column names for movie_schedules
+$activeMovieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movie_schedules WHERE schedulestatus = 'active' AND showdate >= CURRENT_DATE");
 if (!$activeMovieCountResult) {
     die("Error fetching active movie count: " . pg_last_error($conn));
 }
@@ -40,11 +40,12 @@ $activeMovieCount = pg_fetch_assoc($activeMovieCountResult)['count'];
 
 
 // Get recent movies added/updated
+// Using lowercase column names
 $recentMoviesQuery = "
-    SELECT m.\"movieID\", m.\"movieTitle\", m.\"movieGenre\", m.\"movieDuration\", m.\"movieImg\", m.\"movieRelDate\", l.\"locationName\"
+    SELECT m.movieid, m.movietitle, m.moviegenre, m.movieduration, m.movieimg, m.moviereldate, l.locationname
     FROM movietable m
-    LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\"
-    ORDER BY m.\"movieID\" DESC LIMIT 5
+    LEFT JOIN locations l ON m.locationid = l.locationid
+    ORDER BY m.movieid DESC LIMIT 5
 ";
 $recentMovies = pg_query($conn, $recentMoviesQuery);
 if (!$recentMovies) {

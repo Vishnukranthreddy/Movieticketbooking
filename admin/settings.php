@@ -32,7 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = $_POST['email'];
         
         // Use prepared statements for security
-        $updateQuery = "UPDATE admin_users SET \"fullName\" = $1, username = $2 WHERE \"adminID\" = $3";
+        // Changed column names to lowercase
+        $updateQuery = "UPDATE admin_users SET fullname = $1, username = $2 WHERE adminid = $3";
         $updateResult = pg_query_params($conn, $updateQuery, array($name, $email, $admin_id));
 
         if ($updateResult) {
@@ -48,7 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $confirm_password = $_POST['confirm_password'];
         
         // Verify current password - Use prepared statement
-        $passwordQuery = "SELECT password FROM admin_users WHERE \"adminID\" = $1";
+        // Changed column name to lowercase
+        $passwordQuery = "SELECT password FROM admin_users WHERE adminid = $1";
         $passwordResult = pg_query_params($conn, $passwordQuery, array($admin_id));
         $admin = pg_fetch_assoc($passwordResult);
 
@@ -57,7 +59,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($admin && password_verify($current_password, $admin['password'])) {
             if ($new_password === $confirm_password) {
                 $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                $updateQuery = "UPDATE admin_users SET password = $1 WHERE \"adminID\" = $2";
+                // Changed column name to lowercase
+                $updateQuery = "UPDATE admin_users SET password = $1 WHERE adminid = $2";
                 $updateResult = pg_query_params($conn, $updateQuery, array($hashed_password, $admin_id));
                 if ($updateResult) {
                     $message = '<div class="alert alert-success">Password changed successfully!</div>';
@@ -80,9 +83,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get admin profile information
 $admin_id = $_SESSION['admin_id'];
-$profileQuery = "SELECT \"adminID\", username, \"fullName\" FROM admin_users WHERE \"adminID\" = $1";
+// Changed column names to lowercase
+$profileQuery = "SELECT adminid, username, fullname FROM admin_users WHERE adminid = $1";
 $profileResult = pg_query_params($conn, $profileQuery, array($admin_id));
-$profile = pg_fetch_assoc($profileResult);
+
+// Check if query was successful before fetching assoc
+if ($profileResult) {
+    $profile = pg_fetch_assoc($profileResult);
+} else {
+    // Handle the error, e.g., log it and set profile to null or an empty array
+    error_log("Error fetching admin profile: " . pg_last_error($conn));
+    $profile = null; // Or an empty array []
+    $message = '<div class="alert alert-danger">Error loading profile data. Please try again.</div>';
+}
+
 
 pg_close($conn);
 ?>
@@ -331,7 +345,7 @@ pg_close($conn);
                             <form action="" method="POST">
                                 <div class="form-group">
                                     <label for="name">Name</label>
-                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($profile['fullName'] ?? ''); ?>" required>
+                                    <input type="text" class="form-control" id="name" name="name" value="<?php echo htmlspecialchars($profile['fullname'] ?? ''); ?>" required>
                                 </div>
                                 <div class="form-group">
                                     <label for="email">Email</label>

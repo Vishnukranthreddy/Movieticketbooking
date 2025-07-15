@@ -32,16 +32,18 @@ if ($movieId > 0) {
     // if configured with ON DELETE CASCADE.
     
     // Optional: Get movie image path before deletion to remove the file
-    $stmtImgQuery = "SELECT \"movieImg\" FROM movietable WHERE \"movieID\" = $1";
+    // Using lowercase column names
+    $stmtImgQuery = "SELECT movieimg FROM movietable WHERE movieid = $1";
     $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($movieId));
     $movieImgPath = null;
     if ($stmtImgResult && pg_num_rows($stmtImgResult) > 0) {
         $row = pg_fetch_assoc($stmtImgResult);
-        $movieImgPath = $row['movieImg'];
+        $movieImgPath = $row['movieimg'];
     }
 
     // Check for dependencies (schedules) before deleting movie
-    $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"movieID\" = $1";
+    // Using lowercase column names
+    $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE movieid = $1";
     $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
     $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
@@ -50,7 +52,8 @@ if ($movieId > 0) {
         $redirectUrl .= "?error=" . urlencode($errorMessage);
     } else {
         // Delete the movie
-        $deleteQuery = "DELETE FROM movietable WHERE \"movieID\" = $1";
+        // Using lowercase column names
+        $deleteQuery = "DELETE FROM movietable WHERE movieid = $1";
         $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
         
         if ($deleteResult) {

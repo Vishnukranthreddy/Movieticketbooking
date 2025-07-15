@@ -9,7 +9,7 @@ $database = "showtime_select";
 $port = "5432";
 
 // Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$dbname} user={$username} password={$password}";
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
 
 // Establish PostgreSQL connection
 $conn = pg_connect($conn_string);

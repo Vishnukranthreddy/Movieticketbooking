@@ -40,7 +40,7 @@ $activeMovieCount = pg_fetch_assoc($activeMovieCountResult)['count'];
 
 
 // Get recent movies added/updated
-// Using lowercase column names
+// Using lowercase column names for all columns in the SELECT query
 $recentMoviesQuery = "
     SELECT m.movieid, m.movietitle, m.moviegenre, m.movieduration, m.movieimg, m.moviereldate, l.locationname
     FROM movietable m
@@ -51,6 +51,7 @@ $recentMovies = pg_query($conn, $recentMoviesQuery);
 if (!$recentMovies) {
     die("Error fetching recent movies: " . pg_last_error($conn));
 }
+$recentMoviesCount = pg_num_rows($recentMovies); // Get the count of recent movies
 
 pg_close($conn);
 ?>
@@ -241,7 +242,7 @@ pg_close($conn);
                             <span>Content Management</span>
                         </h6>
                         <li class="nav-item">
-                            <a class="nav-link active" href="dashboard.php">
+                            <a class="nav-link active" href="movies.php"> <!-- Changed from dashboard.php to movies.php -->
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
                             </a>
@@ -343,7 +344,7 @@ pg_close($conn);
                     <div class="col-md-4">
                         <div class="dashboard-card">
                             <h4>Recent Additions</h4>
-                            <p>5</p> <!-- Placeholder, can be dynamic -->
+                            <p><?php echo $recentMoviesCount; ?></p> <!-- Dynamic count of recent movies -->
                         </div>
                     </div>
                 </div>
@@ -367,7 +368,10 @@ pg_close($conn);
                                     </thead>
                                     <tbody>
                                         <?php if (pg_num_rows($recentMovies) > 0): ?>
-                                            <?php while ($movie = pg_fetch_assoc($recentMovies)): ?>
+                                            <?php while ($movie = pg_fetch_assoc($recentMovies)): 
+                                                // Ensure fetched keys are lowercase for consistency
+                                                $movie = array_change_key_case($movie, CASE_LOWER);
+                                            ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
                                                     <td>

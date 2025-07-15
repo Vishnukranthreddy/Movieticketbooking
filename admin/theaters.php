@@ -3,19 +3,24 @@ session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
 if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
-    header("Location: index.php");
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Handle theater deletion
@@ -25,38 +30,32 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $theaterId = $_GET['delete'];
     
     // Check if the theater exists
-    $checkQuery = $conn->prepare("SELECT theaterID FROM theaters WHERE theaterID = ?");
-    $checkQuery->bind_param("i", $theaterId);
-    $checkQuery->execute();
-    $result = $checkQuery->get_result();
+    $checkQuery = "SELECT \"theaterID\" FROM theaters WHERE \"theaterID\" = $1";
+    $checkResult = pg_query_params($conn, $checkQuery, array($theaterId));
     
-    if ($result->num_rows > 0) {
-        // IMPORTANT: Check for foreign key dependencies before deleting!
-        // Check if theater is used in theater_halls, which could then be linked to schedules/bookings
-        $checkHallsQuery = $conn->prepare("SELECT COUNT(*) as count FROM theater_halls WHERE theaterID = ?");
-        $checkHallsQuery->bind_param("i", $theaterId);
-        $checkHallsQuery->execute();
-        $hallsCount = $checkHallsQuery->get_result()->fetch_assoc()['count'];
-        $checkHallsQuery->close();
+    if ($checkResult && pg_num_rows($checkResult) > 0) {
+        // Check if theater has associated halls. If halls have schedules/bookings,
+        // those would also need to be handled, ideally via ON DELETE CASCADE or explicit deletion.
+        $checkHallsQuery = "SELECT COUNT(*) as count FROM theater_halls WHERE \"theaterID\" = $1";
+        $checkHallsResult = pg_query_params($conn, $checkHallsQuery, array($theaterId));
+        $hallsCount = pg_fetch_assoc($checkHallsResult)['count'];
 
         if ($hallsCount > 0) {
             $errorMessage = "Cannot delete theater. It has " . $hallsCount . " hall(s) associated. Delete halls first.";
         } else {
             // Delete the theater
-            $deleteQuery = $conn->prepare("DELETE FROM theaters WHERE theaterID = ?");
-            $deleteQuery->bind_param("i", $theaterId);
+            $deleteQuery = "DELETE FROM theaters WHERE \"theaterID\" = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($theaterId));
             
-            if ($deleteQuery->execute()) {
+            if ($deleteResult) {
                 $successMessage = "Theater deleted successfully!";
             } else {
-                $errorMessage = "Error deleting theater: " . $conn->error;
+                $errorMessage = "Error deleting theater: " . pg_last_error($conn);
             }
-            $deleteQuery->close();
         }
     } else {
         $errorMessage = "Theater not found!";
     }
-    $checkQuery->close();
 }
 
 // Get all theaters with pagination
@@ -68,52 +67,36 @@ $offset = ($page - 1) * $recordsPerPage;
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
 $params = [];
-$types = '';
+$param_index = 1;
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    $searchCondition = "WHERE theaterName LIKE ? OR theaterCity LIKE ? OR theaterState LIKE ?";
+    // Using ILIKE for case-insensitive search in PostgreSQL
+    $searchCondition = "WHERE \"theaterName\" ILIKE $" . ($param_index++) . " OR \"theaterCity\" ILIKE $" . ($param_index++) . " OR \"theaterState\" ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam, $searchParam];
-    $types = "sss";
 }
 
 // Count total records for pagination
-$countQuery = "SELECT COUNT(*) as total FROM theaters $searchCondition";
+$countQuery = "SELECT COUNT(*) as total FROM theaters " . $searchCondition;
 
-$stmtCount = $conn->prepare($countQuery);
-if (!empty($searchCondition)) {
-    $stmtCount->bind_param($types, ...$params);
+$stmtCountResult = pg_query_params($conn, $countQuery, $params);
+if (!$stmtCountResult) {
+    die("Error counting theaters: " . pg_last_error($conn));
 }
-$stmtCount->execute();
-$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
-$stmtCount->close();
-
+$totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get theaters for current page
-$query = "SELECT * FROM theaters $searchCondition ORDER BY theaterID DESC LIMIT ?, ?";
+$query = "SELECT * FROM theaters " . $searchCondition . " ORDER BY \"theaterID\" DESC LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
-$stmt = $conn->prepare($query);
+$query_params = array_merge($params, [$recordsPerPage, $offset]);
+$theaters = pg_query_params($conn, $query, $query_params);
 
-// Rebind parameters for the main query
-$query_params = $params; // Copy search parameters
-$query_types = $types; // Copy search types
-
-$query_params[] = $offset;
-$query_params[] = $recordsPerPage;
-$query_types .= "ii";
-
-if (!empty($searchCondition)) {
-    $stmt->bind_param($query_types, ...$query_params);
-} else {
-    $stmt->bind_param("ii", $offset, $recordsPerPage);
+if (!$theaters) {
+    die("Error fetching theaters: " . pg_last_error($conn));
 }
 
-$stmt->execute();
-$theaters = $stmt->get_result();
-$stmt->close();
-
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -235,7 +218,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -252,7 +235,7 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
+                            <a class="nav-link" href="../content_manager/movies.php">
                                 <i class="fas fa-film"></i>
                                 Movies
                             </a>
@@ -281,24 +264,26 @@ $conn->close();
                                 Bookings
                             </a>
                         </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees Users, Reports, Settings in Theater Manager sidebar ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="users.php">
+                            <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
                                 Users
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="reports.php">
+                            <a class="nav-link" href="../admin/reports.php">
                                 <i class="fas fa-chart-bar"></i>
-                                Reports
+                                All Reports
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
+                            <a class="nav-link" href="../admin/settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
                             </a>
                         </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -363,8 +348,8 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if ($theaters->num_rows > 0): ?>
-                                    <?php while ($theater = $theaters->fetch_assoc()): ?>
+                                <?php if (pg_num_rows($theaters) > 0): ?>
+                                    <?php while ($theater = pg_fetch_assoc($theaters)): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($theater['theaterID']); ?></td>
                                             <td><?php echo htmlspecialchars($theater['theaterName']); ?></td>

@@ -21,15 +21,20 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 
 $scheduleId = $_GET['id'];
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensure consistent database
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $schedule = null;
@@ -37,35 +42,42 @@ $errorMessage = '';
 $successMessage = '';
 
 // Fetch schedule data
-$stmt = $conn->prepare("
-    SELECT ms.*, m.movieTitle, h.hallName, t.theaterName
+$stmtQuery = "
+    SELECT ms.*, m.\"movieTitle\", h.\"hallName\", t.\"theaterName\"
     FROM movie_schedules ms
-    JOIN movietable m ON ms.movieID = m.movieID
-    JOIN theater_halls h ON ms.hallID = h.hallID
-    JOIN theaters t ON h.theaterID = t.theaterID
-    WHERE ms.scheduleID = ?
-");
-$stmt->bind_param("i", $scheduleId);
-$stmt->execute();
-$result = $stmt->get_result();
-if ($result->num_rows > 0) {
-    $schedule = $result->fetch_assoc();
+    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
+    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
+    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    WHERE ms.\"scheduleID\" = $1
+";
+$stmtResult = pg_query_params($conn, $stmtQuery, array($scheduleId));
+if ($stmtResult && pg_num_rows($stmtResult) > 0) {
+    $schedule = pg_fetch_assoc($stmtResult);
+    // Convert keys to lowercase for consistency with PostgreSQL's default behavior
+    $schedule = array_change_key_case($schedule, CASE_LOWER);
 } else {
     $errorMessage = "Schedule not found.";
 }
-$stmt->close();
 
 // Get all movies for dropdown
-$movies = $conn->query("SELECT movieID, movieTitle FROM movietable ORDER BY movieTitle");
+$moviesQuery = "SELECT \"movieID\", \"movieTitle\" FROM movietable ORDER BY \"movieTitle\"";
+$movies = pg_query($conn, $moviesQuery);
+if (!$movies) {
+    die("Error fetching movies: " . pg_last_error($conn));
+}
 
 // Get all theater halls for dropdown
-$halls = $conn->query("
-    SELECT h.hallID, h.hallName, h.hallType, t.theaterName 
+$hallsQuery = "
+    SELECT h.\"hallID\", h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
     FROM theater_halls h
-    JOIN theaters t ON h.theaterID = t.theaterID
-    WHERE h.hallStatus = 'active'
-    ORDER BY t.theaterName, h.hallName
-");
+    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    WHERE h.\"hallStatus\" = 'active'
+    ORDER BY t.\"theaterName\", h.\"hallName\"
+";
+$halls = pg_query($conn, $hallsQuery);
+if (!$halls) {
+    die("Error fetching halls: " . pg_last_error($conn));
+}
 
 // Process form submission for update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_schedule'])) {
@@ -76,31 +88,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_schedule'])) {
     $price = $_POST['price'];
     $status = $_POST['status'];
 
-    $updateStmt = $conn->prepare("UPDATE movie_schedules SET movieID = ?, hallID = ?, showDate = ?, showTime = ?, price = ?, scheduleStatus = ? WHERE scheduleID = ?");
-    $updateStmt->bind_param("iissdsi", $movieId, $hallId, $showDate, $showTime, $price, $status, $scheduleId);
+    $updateQuery = "UPDATE movie_schedules SET \"movieID\" = $1, \"hallID\" = $2, \"showDate\" = $3, \"showTime\" = $4, price = $5, \"scheduleStatus\" = $6 WHERE \"scheduleID\" = $7";
+    $updateResult = pg_query_params($conn, $updateQuery, array($movieId, $hallId, $showDate, $showTime, $price, $status, $scheduleId));
     
-    if ($updateStmt->execute()) {
+    if ($updateResult) {
         $successMessage = "Schedule updated successfully!";
         // Re-fetch schedule data to display updated info
-        $stmt = $conn->prepare("
-            SELECT ms.*, m.movieTitle, h.hallName, t.theaterName
+        $stmtQuery = "
+            SELECT ms.*, m.\"movieTitle\", h.\"hallName\", t.\"theaterName\"
             FROM movie_schedules ms
-            JOIN movietable m ON ms.movieID = m.movieID
-            JOIN theater_halls h ON ms.hallID = h.hallID
-            JOIN theaters t ON h.theaterID = t.theaterID
-            WHERE ms.scheduleID = ?
-        ");
-        $stmt->bind_param("i", $scheduleId);
-        $stmt->execute();
-        $schedule = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
+            JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
+            JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
+            JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+            WHERE ms.\"scheduleID\" = $1
+        ";
+        $stmtResult = pg_query_params($conn, $stmtQuery, array($scheduleId));
+        $schedule = pg_fetch_assoc($stmtResult);
+        $schedule = array_change_key_case($schedule, CASE_LOWER);
     } else {
-        $errorMessage = "Error updating schedule: " . $updateStmt->error;
+        $errorMessage = "Error updating schedule: " . pg_last_error($conn);
     }
-    $updateStmt->close();
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -235,7 +245,7 @@ $conn->close();
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Edit Schedule ID: <?php echo htmlspecialchars($schedule['scheduleID'] ?? 'N/A'); ?></h1>
+                    <h1>Edit Schedule ID: <?php echo htmlspecialchars($schedule['scheduleid'] ?? 'N/A'); ?></h1>
                     <a href="schedules.php" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Schedules
                     </a>
@@ -265,8 +275,8 @@ $conn->close();
                             <div class="form-group">
                                 <label for="movieId">Movie</label>
                                 <select class="form-control" id="movieId" name="movieId" required>
-                                    <?php while ($movie = $movies->fetch_assoc()): ?>
-                                        <option value="<?php echo $movie['movieID']; ?>" <?php echo ($schedule['movieID'] == $movie['movieID']) ? 'selected' : ''; ?>>
+                                    <?php while ($movie = pg_fetch_assoc($movies)): ?>
+                                        <option value="<?php echo $movie['movieID']; ?>" <?php echo ($schedule['movieid'] == $movie['movieID']) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($movie['movieTitle']); ?>
                                         </option>
                                     <?php endwhile; ?>
@@ -275,8 +285,8 @@ $conn->close();
                             <div class="form-group">
                                 <label for="hallId">Theater Hall</label>
                                 <select class="form-control" id="hallId" name="hallId" required>
-                                    <?php while ($hall = $halls->fetch_assoc()): ?>
-                                        <option value="<?php echo $hall['hallID']; ?>" <?php echo ($schedule['hallID'] == $hall['hallID']) ? 'selected' : ''; ?>>
+                                    <?php while ($hall = pg_fetch_assoc($halls)): ?>
+                                        <option value="<?php echo $hall['hallID']; ?>" <?php echo ($schedule['hallid'] == $hall['hallID']) ? 'selected' : ''; ?>>
                                             <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
                                         </option>
                                     <?php endwhile; ?>
@@ -284,11 +294,11 @@ $conn->close();
                             </div>
                             <div class="form-group">
                                 <label for="showDate">Show Date</label>
-                                <input type="date" class="form-control" id="showDate" name="showDate" value="<?php echo htmlspecialchars($schedule['showDate']); ?>" required min="<?php echo date('Y-m-d'); ?>">
+                                <input type="date" class="form-control" id="showDate" name="showDate" value="<?php echo htmlspecialchars($schedule['showdate']); ?>" required min="<?php echo date('Y-m-d'); ?>">
                             </div>
                             <div class="form-group">
                                 <label for="showTime">Show Time</label>
-                                <input type="time" class="form-control" id="showTime" name="showTime" value="<?php echo htmlspecialchars($schedule['showTime']); ?>" required>
+                                <input type="time" class="form-control" id="showTime" name="showTime" value="<?php echo htmlspecialchars($schedule['showtime']); ?>" required>
                             </div>
                             <div class="form-group">
                                 <label for="price">Ticket Price (₹)</label>
@@ -297,9 +307,9 @@ $conn->close();
                             <div class="form-group">
                                 <label for="status">Status</label>
                                 <select class="form-control" id="status" name="status" required>
-                                    <option value="active" <?php echo ($schedule['scheduleStatus'] == 'active') ? 'selected' : ''; ?>>Active</option>
-                                    <option value="cancelled" <?php echo ($schedule['scheduleStatus'] == 'cancelled') ? 'selected' : ''; ?>>Cancelled</option>
-                                    <option value="completed" <?php echo ($schedule['scheduleStatus'] == 'completed') ? 'selected' : ''; ?>>Completed</option>
+                                    <option value="active" <?php echo ($schedule['schedulestatus'] == 'active') ? 'selected' : ''; ?>>Active</option>
+                                    <option value="cancelled" <?php echo ($schedule['schedulestatus'] == 'cancelled') ? 'selected' : ''; ?>>Cancelled</option>
+                                    <option value="completed" <?php echo ($schedule['schedulestatus'] == 'completed') ? 'selected' : ''; ?>>Completed</option>
                                 </select>
                             </div>
                             

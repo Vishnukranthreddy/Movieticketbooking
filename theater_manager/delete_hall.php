@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $hallId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -24,33 +29,36 @@ $redirectUrl = "theater_halls.php?theater_id=" . $theaterId; // Default redirect
 
 if ($hallId > 0 && $theaterId > 0) {
     // Check for dependencies (schedules) before deleting hall
-    $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE hallID = ?");
-    $checkSchedulesQuery->bind_param("i", $hallId);
-    $checkSchedulesQuery->execute();
-    $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
-    $checkSchedulesQuery->close();
-
-    if ($schedulesCount > 0) {
-        $errorMessage = "Cannot delete hall. It has " . $schedulesCount . " schedule(s) associated. Please delete all associated schedules first.";
+    $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallID\" = $1";
+    $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
+    
+    if (!$checkSchedulesResult) {
+        $errorMessage = "Database error checking schedules: " . pg_last_error($conn);
         $redirectUrl .= "&error=" . urlencode($errorMessage);
     } else {
-        // Delete the hall
-        $deleteQuery = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ?");
-        $deleteQuery->bind_param("i", $hallId);
-        
-        if ($deleteQuery->execute()) {
-            $redirectUrl .= "&success=Hall deleted successfully!";
-        } else {
-            $errorMessage = "Error deleting hall: " . $conn->error;
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
+
+        if ($schedulesCount > 0) {
+            $errorMessage = "Cannot delete hall. It has " . $schedulesCount . " schedule(s) associated. Please delete all associated schedules first.";
             $redirectUrl .= "&error=" . urlencode($errorMessage);
+        } else {
+            // Delete the hall
+            $deleteQuery = "DELETE FROM theater_halls WHERE \"hallID\" = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($hallId));
+            
+            if ($deleteResult) {
+                $redirectUrl .= "&success=Hall deleted successfully!";
+            } else {
+                $errorMessage = "Error deleting hall: " . pg_last_error($conn);
+                $redirectUrl .= "&error=" . urlencode($errorMessage);
+            }
         }
-        $deleteQuery->close();
     }
 } else {
     $redirectUrl = "theaters.php?error=" . urlencode("Invalid hall or theater ID provided for deletion.");
 }
 
-$conn->close();
+pg_close($conn);
 
 header("Location: " . $redirectUrl);
 exit();

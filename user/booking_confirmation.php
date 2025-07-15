@@ -1,15 +1,20 @@
 <?php
 session_start();
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $bookingDetails = null;
@@ -18,8 +23,9 @@ $errorMessage = '';
 if (isset($_GET['booking_id']) && is_numeric($_GET['booking_id'])) {
     $bookingID = $_GET['booking_id'];
 
-    // Fetch comprehensive booking details
-    $stmt = $conn->prepare("
+    // Fetch comprehensive booking details using a prepared statement for security
+    // PostgreSQL uses $1, $2, etc. for parameters in prepared statements
+    $query = "
         SELECT b.*, m.movieTitle, m.movieImg, m.movieGenre, m.movieDuration,
                ms.showDate, ms.showTime, ms.price as ticketPrice,
                h.hallName, h.hallType, t.theaterName, t.theaterAddress, t.theaterCity
@@ -28,20 +34,24 @@ if (isset($_GET['booking_id']) && is_numeric($_GET['booking_id'])) {
         LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
         LEFT JOIN theater_halls h ON b.hallID = h.hallID
         LEFT JOIN theaters t ON h.theaterID = t.theaterID
-        WHERE b.bookingID = ?
-    ");
-    $stmt->bind_param("i", $bookingID);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows > 0) {
-        $bookingDetails = $result->fetch_assoc();
+        WHERE b.bookingID = $1
+    ";
+    
+    $result = pg_query_params($conn, $query, array($bookingID));
+
+    if ($result) {
+        if (pg_num_rows($result) > 0) {
+            $bookingDetails = pg_fetch_assoc($result);
+        } else {
+            $errorMessage = "Booking details not found.";
+        }
     } else {
-        $errorMessage = "Booking details not found.";
+        $errorMessage = "Error fetching booking details: " . pg_last_error($conn);
     }
-    $stmt->close();
 
     // Optionally, check if the booking belongs to the logged-in user for security
-    if (isset($_SESSION['user_username']) && $bookingDetails['bookingEmail'] !== $_SESSION['user_username']) {
+    // Note: PostgreSQL column names are typically lowercase by default
+    if (isset($_SESSION['user_username']) && $bookingDetails && $bookingDetails['bookingemail'] !== $_SESSION['user_username']) {
         $errorMessage = "Access Denied: This booking does not belong to your account.";
         $bookingDetails = null; // Clear details if unauthorized
     }
@@ -50,7 +60,8 @@ if (isset($_GET['booking_id']) && is_numeric($_GET['booking_id'])) {
     $errorMessage = "Invalid booking ID. Please go back to your profile or home page.";
 }
 
-$conn->close();
+// Close PostgreSQL connection
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -180,32 +191,32 @@ $conn->close();
                 <div class="printable-ticket bg-gray-800 p-6 rounded-lg text-left shadow-lg">
                     <div class="flex justify-between items-center border-b border-gray-700 pb-4 mb-4">
                         <h2 class="text-4xl font-bold text-white logo-text">Showtime Select</h2>
-                        <img class="qr-code-img" src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=<?php echo urlencode($bookingDetails['ORDERID']); ?>" alt="QR Code">
+                        <img class="qr-code-img" src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=<?php echo urlencode($bookingDetails['orderid']); ?>" alt="QR Code">
                     </div>
 
-                    <h3 class="text-3xl font-semibold text-white mb-4"><?php echo htmlspecialchars($bookingDetails['movieTitle'] ?? 'N/A Movie'); ?></h3>
+                    <h3 class="text-3xl font-semibold text-white mb-4"><?php echo htmlspecialchars($bookingDetails['movietitle'] ?? 'N/A Movie'); ?></h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-lg">
                         <div>
-                            <p><strong>Order ID:</strong> <span class="text-e94560"><?php echo htmlspecialchars($bookingDetails['ORDERID']); ?></span></p>
-                            <p><strong>Booking ID:</strong> <?php echo htmlspecialchars($bookingDetails['bookingID']); ?></p>
-                            <p><strong>Date:</strong> <?php echo date('l, F j, Y', strtotime($bookingDetails['showDate'] ?? '')); ?></p>
-                            <p><strong>Time:</strong> <?php echo date('h:i A', strtotime($bookingDetails['showTime'] ?? '')); ?></p>
+                            <p><strong>Order ID:</strong> <span class="text-e94560"><?php echo htmlspecialchars($bookingDetails['orderid']); ?></span></p>
+                            <p><strong>Booking ID:</strong> <?php echo htmlspecialchars($bookingDetails['bookingid']); ?></p>
+                            <p><strong>Date:</strong> <?php echo date('l, F j, Y', strtotime($bookingDetails['showdate'] ?? '')); ?></p>
+                            <p><strong>Time:</strong> <?php echo date('h:i A', strtotime($bookingDetails['showtime'] ?? '')); ?></p>
                             <p><strong>Seats:</strong> <span class="font-bold text-yellow-300"><?php echo htmlspecialchars($bookingDetails['seats'] ?? 'N/A'); ?></span></p>
                         </div>
                         <div>
-                            <p><strong>Theater:</strong> <?php echo htmlspecialchars($bookingDetails['theaterName'] ?? 'N/A Theater'); ?></p>
-                            <p><strong>Address:</strong> <?php echo htmlspecialchars($bookingDetails['theaterAddress'] . ', ' . $bookingDetails['theaterCity']); ?></p>
-                            <p><strong>Hall:</strong> <?php echo htmlspecialchars($bookingDetails['hallName'] ?? 'N/A Hall'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($bookingDetails['hallType'] ?? ''))); ?>)</p>
-                            <p><strong>Price per ticket:</strong> ₹<?php echo number_format($bookingDetails['ticketPrice'] ?? 0, 2); ?></p>
+                            <p><strong>Theater:</strong> <?php echo htmlspecialchars($bookingDetails['theatername'] ?? 'N/A Theater'); ?></p>
+                            <p><strong>Address:</strong> <?php echo htmlspecialchars($bookingDetails['theateraddress'] . ', ' . $bookingDetails['theatercity']); ?></p>
+                            <p><strong>Hall:</strong> <?php echo htmlspecialchars($bookingDetails['hallname'] ?? 'N/A Hall'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($bookingDetails['halltype'] ?? ''))); ?>)</p>
+                            <p><strong>Price per ticket:</strong> ₹<?php echo number_format($bookingDetails['ticketprice'] ?? 0, 2); ?></p>
                             <p><strong>Total Amount:</strong> <span class="text-green-400 font-bold">₹<?php echo number_format($bookingDetails['amount'] ?? 0, 2); ?></span></p>
                         </div>
                     </div>
 
                     <div class="mt-8 pt-4 border-t border-gray-700">
                         <h4 class="text-2xl font-semibold text-white mb-3">Customer Information</h4>
-                        <p><strong>Name:</strong> <?php echo htmlspecialchars($bookingDetails['bookingFName'] . ' ' . $bookingDetails['bookingLName']); ?></p>
-                        <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['bookingEmail']); ?></p>
-                        <p><strong>Phone:</strong> <?php echo htmlspecialchars($bookingDetails['bookingPNumber']); ?></p>
+                        <p><strong>Name:</strong> <?php echo htmlspecialchars($bookingDetails['bookingfname'] . ' ' . $bookingDetails['bookinglname']); ?></p>
+                        <p><strong>Email:</strong> <?php echo htmlspecialchars($bookingDetails['bookingemail']); ?></p>
+                        <p><strong>Phone:</strong> <?php echo htmlspecialchars($bookingDetails['bookingpnumber']); ?></p>
                     </div>
                 </div>
 

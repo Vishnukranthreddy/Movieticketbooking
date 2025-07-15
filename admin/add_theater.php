@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Process form submission
@@ -49,7 +54,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
         
         // Basic image validation
-        $check = @getimagesize($_FILES["theaterPanoramaImage"]["tmp_name"]); // Use @ to suppress warnings for invalid images
+        $check = @getimagesize($_FILES["theaterPanoramaImage"]["tmp_name"]); // Use @to suppress warnings for invalid images
         if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
         if($_FILES["theaterPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; } // Larger size for panoramas
         if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
@@ -73,47 +78,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Only proceed with database insert if panorama upload (if attempted) was successful or no file was selected
     if ($uploadOk !== 0) {
         // Insert theater data using prepared statement
-        $stmt = $conn->prepare("INSERT INTO theaters (theaterName, theaterAddress, theaterCity, theaterState, theaterZipcode, theaterPhone, theaterEmail, theaterStatus, theaterPanoramaImg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        // 'sssssssss' for 8 strings + 1 potential string for panorama image
-        $stmt->bind_param("sssssssss", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg);
+        $insertQuery = "INSERT INTO theaters (\"theaterName\", \"theaterAddress\", \"theaterCity\", \"theaterState\", \"theaterZipcode\", \"theaterPhone\", \"theaterEmail\", \"theaterStatus\", \"theaterPanoramaImg\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING \"theaterID\"";
+        $insertResult = pg_query_params($conn, $insertQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg));
         
-        if ($stmt->execute()) {
-            $theaterId = $conn->insert_id; // Get the ID of the newly inserted theater
+        if ($insertResult) {
+            $row = pg_fetch_assoc($insertResult);
+            $theaterId = $row['theaterID']; // Get the ID of the newly inserted theater
             
             // Check if we need to create default halls
             if (isset($_POST['createDefaultHalls']) && $_POST['createDefaultHalls'] == 'yes') {
                 // Prepared statement for hall insertion
                 // Note: We don't have hall panorama upload here as it's for specific halls, not default ones.
-                $hallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus) VALUES (?, ?, ?, ?, ?)");
+                $hallInsertQuery = "INSERT INTO theater_halls (\"theaterID\", \"hallName\", \"hallType\", \"totalSeats\", \"hallStatus\") VALUES ($1, $2, $3, $4, $5)";
                 $hallStatus = "active";
 
                 // Create Main Hall
                 $hallName = "Main Hall";
                 $hallType = "main-hall";
                 $totalSeats = 120;
-                if ($hallStmt) { // Check if prepare was successful
-                    $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-                    $hallStmt->execute();
-                }
+                pg_query_params($conn, $hallInsertQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
                 
                 // Create VIP Hall
                 $hallName = "VIP Hall";
                 $hallType = "vip-hall";
                 $totalSeats = 80;
-                if ($hallStmt) {
-                    $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-                    $hallStmt->execute();
-                }
+                pg_query_params($conn, $hallInsertQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
                 
                 // Create Private Hall
                 $hallName = "Private Hall";
                 $hallType = "private-hall";
                 $totalSeats = 40;
-                if ($hallStmt) {
-                    $hallStmt->bind_param("issss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus);
-                    $hallStmt->execute();
-                }
-                if ($hallStmt) $hallStmt->close(); // Close the hall insertion statement
+                pg_query_params($conn, $hallInsertQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
             }
             
             $successMessage = "Theater added successfully!";
@@ -121,17 +116,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             header("Location: theaters.php?success=1");
             exit();
         } else {
-            $errorMessage = "Error adding theater to database: " . $stmt->error;
+            $errorMessage = "Error adding theater to database: " . pg_last_error($conn);
             // If DB insert fails, try to delete the uploaded panorama file to clean up
             if ($theaterPanoramaImg && file_exists("../" . $theaterPanoramaImg)) {
                 unlink("../" . $theaterPanoramaImg);
             }
         }
-        $stmt->close();
     }
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>

@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $movieId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -24,44 +29,54 @@ $redirectUrl = "movies.php"; // Default redirect location
 if ($movieId > 0) {
     // Before deleting movie, check for dependent records in movie_schedules
     // IMPORTANT: Foreign key constraints should ideally handle cascading deletes
-    // if configured with ON DELETE CASCADE. If not, you must delete child records first.
-    // Our combined SQL does have ON DELETE CASCADE for movie_schedules.movieID.
+    // if configured with ON DELETE CASCADE.
     
     // Optional: Get movie image path before deletion to remove the file
-    $stmtImg = $conn->prepare("SELECT movieImg FROM movietable WHERE movieID = ?");
-    $stmtImg->bind_param("i", $movieId);
-    $stmtImg->execute();
-    $resultImg = $stmtImg->get_result();
+    $stmtImgQuery = "SELECT \"movieImg\" FROM movietable WHERE \"movieID\" = $1";
+    $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($movieId));
     $movieImgPath = null;
-    if ($row = $resultImg->fetch_assoc()) {
+    if ($stmtImgResult && pg_num_rows($stmtImgResult) > 0) {
+        $row = pg_fetch_assoc($stmtImgResult);
         $movieImgPath = $row['movieImg'];
     }
-    $stmtImg->close();
 
-    // Delete the movie
-    $deleteQuery = $conn->prepare("DELETE FROM movietable WHERE movieID = ?");
-    $deleteQuery->bind_param("i", $movieId);
-    
-    if ($deleteQuery->execute()) {
-        // If ON DELETE CASCADE is set up for movie_schedules,
-        // then associated schedules and their related bookings (if FK from bookings to schedules)
-        // should also be deleted automatically.
-        
-        // Delete the associated image file if it exists
-        if ($movieImgPath && file_exists("../" . $movieImgPath)) {
-            unlink("../" . $movieImgPath);
-        }
-        
-        $redirectUrl .= "?success=Movie deleted successfully!";
+    // Check for dependencies (schedules) before deleting movie
+    $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"movieID\" = $1";
+    $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
+    $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
+
+    if ($schedulesCount > 0) {
+        $errorMessage = "Cannot delete movie. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
+        $redirectUrl .= "?error=" . urlencode($errorMessage);
     } else {
-        $redirectUrl .= "?error=Error deleting movie: " . urlencode($conn->error);
+        // Delete the movie
+        $deleteQuery = "DELETE FROM movietable WHERE \"movieID\" = $1";
+        $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
+        
+        if ($deleteResult) {
+            // If ON DELETE CASCADE is set up for movie_schedules,
+            // then associated schedules and their related bookings (if FK from bookings to schedules)
+            // should also be deleted automatically.
+            
+            // Delete the associated image file if it exists
+            // Path needs to be relative to the script's location or absolute
+            if ($movieImgPath && file_exists("../" . $movieImgPath)) { // One level up to project root, then img/
+                // Ensure the path is within the expected img directory to prevent directory traversal
+                if (strpos($movieImgPath, 'img/') === 0 && realpath("../" . $movieImgPath)) {
+                    unlink("../" . $movieImgPath);
+                }
+            }
+            
+            $redirectUrl .= "?success=Movie deleted successfully!";
+        } else {
+            $redirectUrl .= "?error=Error deleting movie: " . urlencode(pg_last_error($conn));
+        }
     }
-    $deleteQuery->close();
 } else {
     $redirectUrl .= "?error=Invalid movie ID provided for deletion.";
 }
 
-$conn->close();
+pg_close($conn);
 
 header("Location: " . $redirectUrl);
 exit();

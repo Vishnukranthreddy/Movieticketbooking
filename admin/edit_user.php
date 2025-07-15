@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $userId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -25,16 +30,13 @@ $successMessage = '';
 
 if ($userId > 0) {
     // Fetch current user details
-    $stmt = $conn->prepare("SELECT id, username, name, phone FROM users WHERE id = ?");
-    $stmt->bind_param("i", $userId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows > 0) {
-        $user = $result->fetch_assoc();
+    $stmtQuery = "SELECT id, username, name, phone FROM users WHERE id = $1";
+    $stmtResult = pg_query_params($conn, $stmtQuery, array($userId));
+    if ($stmtResult && pg_num_rows($stmtResult) > 0) {
+        $user = pg_fetch_assoc($stmtResult);
     } else {
         $errorMessage = "User not found.";
     }
-    $stmt->close();
 } else {
     $errorMessage = "Invalid user ID provided.";
 }
@@ -49,36 +51,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_user'])) {
         $newPhone = $_POST['phone'] ?? ''; // New phone field
 
         // Check if new username/email already exists for another user
-        $checkUsernameQuery = $conn->prepare("SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1");
-        $checkUsernameQuery->bind_param("si", $newUsername, $userId);
-        $checkUsernameQuery->execute();
-        $checkUsernameResult = $checkUsernameQuery->get_result();
-        $checkUsernameQuery->close();
+        $checkUsernameQuery = "SELECT id FROM users WHERE username = $1 AND id != $2 LIMIT 1";
+        $checkUsernameResult = pg_query_params($conn, $checkUsernameQuery, array($newUsername, $userId));
 
-        if ($checkUsernameResult->num_rows > 0) {
+        if ($checkUsernameResult && pg_num_rows($checkUsernameResult) > 0) {
             $errorMessage = "Username (Email) already exists for another user. Please choose a different one.";
         } else {
-            $updateStmt = $conn->prepare("UPDATE users SET name = ?, username = ?, phone = ? WHERE id = ?");
-            $updateStmt->bind_param("sssi", $newName, $newUsername, $newPhone, $userId);
+            $updateQuery = "UPDATE users SET name = $1, username = $2, phone = $3 WHERE id = $4";
+            $updateResult = pg_query_params($conn, $updateQuery, array($newName, $newUsername, $newPhone, $userId));
 
-            if ($updateStmt->execute()) {
+            if ($updateResult) {
                 $successMessage = "User updated successfully!";
                 // Refresh user data after update
-                $stmt = $conn->prepare("SELECT id, username, name, phone FROM users WHERE id = ?");
-                $stmt->bind_param("i", $userId);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                $user = $result->fetch_assoc(); // Update $user variable with new data
-                $stmt->close();
+                $stmtQuery = "SELECT id, username, name, phone FROM users WHERE id = $1";
+                $stmtResult = pg_query_params($conn, $stmtQuery, array($userId));
+                $user = pg_fetch_assoc($stmtResult); // Update $user variable with new data
             } else {
-                $errorMessage = "Error updating user: " . $updateStmt->error;
+                $errorMessage = "Error updating user: " . pg_last_error($conn);
             }
-            $updateStmt->close();
         }
     }
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>

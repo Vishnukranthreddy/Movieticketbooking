@@ -1,6 +1,22 @@
 <?php
 session_start();
 
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
+
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
+}
+
 // Check if already logged in, redirect to appropriate dashboard
 if (isset($_SESSION['admin_id'])) {
     if ($_SESSION['admin_role'] == 1) { // Super Admin
@@ -16,17 +32,6 @@ if (isset($_SESSION['admin_id'])) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
-
 $error = "";
 
 // Process login form
@@ -35,13 +40,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $input_password = $_POST["password"];
 
     // Use prepared statements to prevent SQL injection
-    $query = $conn->prepare("SELECT adminID, username, password, fullName, roleID FROM admin_users WHERE username = ? AND status = 'active' LIMIT 1");
-    $query->bind_param("s", $input_username);
-    $query->execute();
-    $result = $query->get_result();
+    $query = "SELECT \"adminID\", username, password, \"fullName\", \"roleID\" FROM admin_users WHERE username = $1 AND status = 'active' LIMIT 1";
+    $result = pg_query_params($conn, $query, array($input_username));
 
-    if ($result->num_rows > 0) {
-        $admin = $result->fetch_assoc();
+    if ($result && pg_num_rows($result) > 0) {
+        $admin = pg_fetch_assoc($result);
         // Verify the password (assuming it's hashed in the database as per combined SQL)
         if (password_verify($input_password, $admin['password'])) {
             // Set session variables
@@ -51,10 +54,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $_SESSION['admin_role'] = $admin['roleID']; // IMPORTANT: Store the roleID
 
             // Update last login time
-            $updateQuery = $conn->prepare("UPDATE admin_users SET lastLogin = NOW() WHERE adminID = ?");
-            $updateQuery->bind_param("i", $admin['adminID']);
-            $updateQuery->execute();
-            $updateQuery->close();
+            $updateQuery = "UPDATE admin_users SET \"lastLogin\" = NOW() WHERE \"adminID\" = $1";
+            pg_query_params($conn, $updateQuery, array($admin['adminID']));
 
             // Redirect based on role
             $_SESSION['just_logged_in'] = true; // Use this for welcome messages if needed
@@ -76,10 +77,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } else {
         $error = "Invalid username or password.";
     }
-    $query->close();
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>

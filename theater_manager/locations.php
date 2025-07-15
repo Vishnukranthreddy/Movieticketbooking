@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Handle location deletion
@@ -25,37 +30,31 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $locationId = $_GET['delete'];
     
     // Check if the location exists
-    $checkQuery = $conn->prepare("SELECT locationID FROM locations WHERE locationID = ?");
-    $checkQuery->bind_param("i", $locationId);
-    $checkQuery->execute();
-    $result = $checkQuery->get_result();
+    $checkQuery = "SELECT \"locationID\" FROM locations WHERE \"locationID\" = $1";
+    $checkResult = pg_query_params($conn, $checkQuery, array($locationId));
     
-    if ($result->num_rows > 0) {
+    if ($checkResult && pg_num_rows($checkResult) > 0) {
         // Check if location is used in movies
-        $checkMoviesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movietable WHERE locationID = ?");
-        $checkMoviesQuery->bind_param("i", $locationId);
-        $checkMoviesQuery->execute();
-        $moviesCount = $checkMoviesQuery->get_result()->fetch_assoc()['count'];
-        $checkMoviesQuery->close();
+        $checkMoviesQuery = "SELECT COUNT(*) as count FROM movietable WHERE \"locationID\" = $1";
+        $checkMoviesResult = pg_query_params($conn, $checkMoviesQuery, array($locationId));
+        $moviesCount = pg_fetch_assoc($checkMoviesResult)['count'];
         
         if ($moviesCount > 0) {
             $errorMessage = "Cannot delete location. It is associated with " . $moviesCount . " movie(s).";
         } else {
             // Delete the location
-            $deleteQuery = $conn->prepare("DELETE FROM locations WHERE locationID = ?");
-            $deleteQuery->bind_param("i", $locationId);
+            $deleteQuery = "DELETE FROM locations WHERE \"locationID\" = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($locationId));
             
-            if ($deleteQuery->execute()) {
+            if ($deleteResult) {
                 $successMessage = "Location deleted successfully!";
             } else {
-                $errorMessage = "Error deleting location: " . $conn->error;
+                $errorMessage = "Error deleting location: " . pg_last_error($conn);
             }
-            $deleteQuery->close();
         }
     } else {
         $errorMessage = "Location not found!";
     }
-    $checkQuery->close();
 }
 
 // Handle location addition
@@ -65,15 +64,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_location'])) {
     $locationCountry = $_POST['locationCountry'];
     $locationStatus = $_POST['locationStatus'];
     
-    $stmt = $conn->prepare("INSERT INTO locations (locationName, locationState, locationCountry, locationStatus) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("ssss", $locationName, $locationState, $locationCountry, $locationStatus);
+    $insertQuery = "INSERT INTO locations (\"locationName\", \"locationState\", \"locationCountry\", \"locationStatus\") VALUES ($1, $2, $3, $4)";
+    $insertResult = pg_query_params($conn, $insertQuery, array($locationName, $locationState, $locationCountry, $locationStatus));
     
-    if ($stmt->execute()) {
+    if ($insertResult) {
         $successMessage = "Location added successfully!";
     } else {
-        $errorMessage = "Error adding location: " . $stmt->error;
+        $errorMessage = "Error adding location: " . pg_last_error($conn);
     }
-    $stmt->close();
 }
 
 // Handle location update
@@ -84,21 +82,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_location'])) {
     $locationCountry = $_POST['locationCountry'];
     $locationStatus = $_POST['locationStatus'];
     
-    $stmt = $conn->prepare("UPDATE locations SET locationName = ?, locationState = ?, locationCountry = ?, locationStatus = ? WHERE locationID = ?");
-    $stmt->bind_param("ssssi", $locationName, $locationState, $locationCountry, $locationStatus, $locationId);
+    $updateQuery = "UPDATE locations SET \"locationName\" = $1, \"locationState\" = $2, \"locationCountry\" = $3, \"locationStatus\" = $4 WHERE \"locationID\" = $5";
+    $updateResult = pg_query_params($conn, $updateQuery, array($locationName, $locationState, $locationCountry, $locationStatus, $locationId));
     
-    if ($stmt->execute()) {
+    if ($updateResult) {
         $successMessage = "Location updated successfully!";
     } else {
-        $errorMessage = "Error updating location: " . $stmt->error;
+        $errorMessage = "Error updating location: " . pg_last_error($conn);
     }
-    $stmt->close();
 }
 
 // Get all locations
-$locations = $conn->query("SELECT * FROM locations ORDER BY locationName");
+$locationsQuery = "SELECT * FROM locations ORDER BY \"locationName\"";
+$locations = pg_query($conn, $locationsQuery);
+if (!$locations) {
+    die("Error fetching locations: " . pg_last_error($conn));
+}
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -321,29 +322,29 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if ($locations->num_rows > 0): ?>
-                                    <?php while ($location = $locations->fetch_assoc()): ?>
+                                <?php if (pg_num_rows($locations) > 0): ?>
+                                    <?php while ($location = pg_fetch_assoc($locations)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($location['locationID']); ?></td>
-                                            <td><?php echo htmlspecialchars($location['locationName']); ?></td>
-                                            <td><?php echo htmlspecialchars($location['locationState']); ?></td>
-                                            <td><?php echo htmlspecialchars($location['locationCountry']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationid']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationname']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationstate']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationcountry']); ?></td>
                                             <td>
-                                                <span class="status-badge <?php echo $location['locationStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($location['locationStatus'])); ?>
+                                                <span class="status-badge <?php echo $location['locationstatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($location['locationstatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
                                                 <button type="button" class="btn btn-sm btn-warning edit-location" 
-                                                        data-id="<?php echo htmlspecialchars($location['locationID']); ?>"
-                                                        data-name="<?php echo htmlspecialchars($location['locationName']); ?>"
-                                                        data-state="<?php echo htmlspecialchars($location['locationState']); ?>"
-                                                        data-country="<?php echo htmlspecialchars($location['locationCountry']); ?>"
-                                                        data-status="<?php echo htmlspecialchars($location['locationStatus']); ?>"
+                                                        data-id="<?php echo htmlspecialchars($location['locationid']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($location['locationname']); ?>"
+                                                        data-state="<?php echo htmlspecialchars($location['locationstate']); ?>"
+                                                        data-country="<?php echo htmlspecialchars($location['locationcountry']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($location['locationstatus']); ?>"
                                                         data-toggle="modal" data-target="#editLocationModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
-                                                <a href="locations.php?delete=<?php echo htmlspecialchars($location['locationID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location? This may affect movies linked to this location.')">
+                                                <a href="locations.php?delete=<?php echo htmlspecialchars($location['locationid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location? This may affect movies linked to this location.')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>

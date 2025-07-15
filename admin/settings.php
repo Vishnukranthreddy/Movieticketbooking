@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Process form submission
@@ -27,16 +32,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = $_POST['email'];
         
         // Use prepared statements for security
-        $updateQuery = $conn->prepare("UPDATE admin_users SET fullName = ?, username = ? WHERE adminID = ?");
-        $updateQuery->bind_param("ssi", $name, $email, $admin_id);
+        $updateQuery = "UPDATE admin_users SET \"fullName\" = $1, username = $2 WHERE \"adminID\" = $3";
+        $updateResult = pg_query_params($conn, $updateQuery, array($name, $email, $admin_id));
 
-        if ($updateQuery->execute()) {
+        if ($updateResult) {
             $_SESSION['admin_name'] = $name;
             $message = '<div class="alert alert-success">Profile updated successfully!</div>';
         } else {
-            $message = '<div class="alert alert-danger">Error updating profile: ' . $conn->error . '</div>';
+            $message = '<div class="alert alert-danger">Error updating profile: ' . pg_last_error($conn) . '</div>';
         }
-        $updateQuery->close(); // Close the statement
     } elseif (isset($_POST['change_password'])) {
         $admin_id = $_SESSION['admin_id'];
         $current_password = $_POST['current_password'];
@@ -44,26 +48,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $confirm_password = $_POST['confirm_password'];
         
         // Verify current password - Use prepared statement
-        $passwordQuery = $conn->prepare("SELECT password FROM admin_users WHERE adminID = ?");
-        $passwordQuery->bind_param("i", $admin_id);
-        $passwordQuery->execute();
-        $result = $passwordQuery->get_result();
-        $admin = $result->fetch_assoc();
-        $passwordQuery->close(); // Close the statement
+        $passwordQuery = "SELECT password FROM admin_users WHERE \"adminID\" = $1";
+        $passwordResult = pg_query_params($conn, $passwordQuery, array($admin_id));
+        $admin = pg_fetch_assoc($passwordResult);
 
         // IMPORTANT: Assuming passwords are HASHED in `admin_users` table as per initial SQL script.
         // If your `admin_users` passwords are plain text, change `password_verify` to direct comparison.
-        if (password_verify($current_password, $admin['password'])) {
+        if ($admin && password_verify($current_password, $admin['password'])) {
             if ($new_password === $confirm_password) {
                 $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                $updateQuery = $conn->prepare("UPDATE admin_users SET password = ? WHERE adminID = ?");
-                $updateQuery->bind_param("si", $hashed_password, $admin_id);
-                if ($updateQuery->execute()) {
+                $updateQuery = "UPDATE admin_users SET password = $1 WHERE \"adminID\" = $2";
+                $updateResult = pg_query_params($conn, $updateQuery, array($hashed_password, $admin_id));
+                if ($updateResult) {
                     $message = '<div class="alert alert-success">Password changed successfully!</div>';
                 } else {
-                    $message = '<div class="alert alert-danger">Error changing password: ' . $conn->error . '</div>';
+                    $message = '<div class="alert alert-danger">Error changing password: ' . pg_last_error($conn) . '</div>';
                 }
-                $updateQuery->close(); // Close the statement
             } else {
                 $message = '<div class="alert alert-danger">New passwords do not match!</div>';
             }
@@ -73,20 +73,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['update_site_settings'])) {
         // This section is for hypothetical site settings.
         // No specific table for site settings was provided, so this is just a placeholder.
+        // In a real application, you would store these in a 'settings' table.
         $message = '<div class="alert alert-success">Site settings updated successfully! (Functionality not fully implemented without a settings table)</div>';
     }
 }
 
 // Get admin profile information
 $admin_id = $_SESSION['admin_id'];
-$profileQuery = $conn->prepare("SELECT adminID, username, fullName FROM admin_users WHERE adminID = ?");
-$profileQuery->bind_param("i", $admin_id);
-$profileQuery->execute();
-$profileResult = $profileQuery->get_result();
-$profile = $profileResult->fetch_assoc();
-$profileQuery->close(); // Close the statement
+$profileQuery = "SELECT \"adminID\", username, \"fullName\" FROM admin_users WHERE \"adminID\" = $1";
+$profileResult = pg_query_params($conn, $profileQuery, array($admin_id));
+$profile = pg_fetch_assoc($profileResult);
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -254,31 +252,31 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
+                            <a class="nav-link" href="../content_manager/movies.php">
                                 <i class="fas fa-film"></i>
                                 Movies
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="theaters.php">
+                            <a class="nav-link" href="../theater_manager/theaters.php">
                                 <i class="fas fa-building"></i>
                                 Theaters
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
+                            <a class="nav-link" href="../theater_manager/locations.php">
                                 <i class="fas fa-map-marker-alt"></i>
                                 Locations
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="schedules.php">
+                            <a class="nav-link" href="../theater_manager/schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="bookings.php">
+                            <a class="nav-link" href="../theater_manager/bookings.php">
                                 <i class="fas fa-ticket-alt"></i>
                                 Bookings
                             </a>
@@ -293,6 +291,12 @@ $conn->close();
                             <a class="nav-link active" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
                             </a>
                         </li>
                     </ul>

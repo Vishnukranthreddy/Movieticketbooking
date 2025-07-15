@@ -8,49 +8,60 @@ if (!isset($_SESSION['admin_id'])) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Get counts for dashboard
-$movieCount = $conn->query("SELECT COUNT(*) as count FROM movietable")->fetch_assoc()['count'];
-$bookingCount = $conn->query("SELECT COUNT(*) as count FROM bookingtable")->fetch_assoc()['count'];
-$userCount = $conn->query("SELECT COUNT(*) as count FROM users")->fetch_assoc()['count'];
-$theaterCount = $conn->query("SELECT COUNT(*) as count FROM theaters")->fetch_assoc()['count'];
-$scheduleCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules")->fetch_assoc()['count'];
+$movieCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM movietable"))['count'];
+$bookingCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM bookingtable"))['count'];
+$userCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM users"))['count'];
+$theaterCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM theaters"))['count'];
+$scheduleCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM movie_schedules"))['count'];
 
 // Get recent bookings (more comprehensive join)
 $recentBookingsQuery = "
-    SELECT b.bookingID, b.bookingFName, b.bookingLName, b.bookingEmail, b.bookingPNumber, b.seats, b.amount,
-           m.movieTitle, m.movieImg,
-           ms.showDate, ms.showTime,
-           t.theaterName, h.hallName
+    SELECT b.\"bookingID\", b.\"bookingFName\", b.\"bookingLName\", b.\"bookingEmail\", b.\"bookingPNumber\", b.seats, b.amount,
+           m.\"movieTitle\", m.\"movieImg\",
+           ms.\"showDate\", ms.\"showTime\",
+           t.\"theaterName\", h.\"hallName\"
     FROM bookingtable b
-    LEFT JOIN movietable m ON b.movieID = m.movieID
-    LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
-    LEFT JOIN theater_halls h ON b.hallID = h.hallID
-    LEFT JOIN theaters t ON h.theaterID = t.theaterID
-    ORDER BY b.bookingID DESC LIMIT 5
+    LEFT JOIN movietable m ON b.\"movieID\" = m.\"movieID\"
+    LEFT JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
+    LEFT JOIN theater_halls h ON b.\"hallID\" = h.\"hallID\"
+    LEFT JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    ORDER BY b.\"bookingID\" DESC LIMIT 5
 ";
-$recentBookings = $conn->query($recentBookingsQuery);
+$recentBookings = pg_query($conn, $recentBookingsQuery);
+if (!$recentBookings) {
+    die("Error fetching recent bookings: " . pg_last_error($conn));
+}
 
 // Get recent movies
 $recentMoviesQuery = "
-    SELECT m.movieID, m.movieTitle, m.movieGenre, m.movieDuration, m.movieImg, l.locationName
+    SELECT m.\"movieID\", m.\"movieTitle\", m.\"movieGenre\", m.\"movieDuration\", m.\"movieImg\", l.\"locationName\"
     FROM movietable m
-    LEFT JOIN locations l ON m.locationID = l.locationID
-    ORDER BY m.movieID DESC LIMIT 5
+    LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\"
+    ORDER BY m.\"movieID\" DESC LIMIT 5
 ";
-$recentMovies = $conn->query($recentMoviesQuery);
+$recentMovies = pg_query($conn, $recentMoviesQuery);
+if (!$recentMovies) {
+    die("Error fetching recent movies: " . pg_last_error($conn));
+}
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -389,8 +400,8 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if ($recentBookings->num_rows > 0): ?>
-                                            <?php while ($booking = $recentBookings->fetch_assoc()): ?>
+                                        <?php if (pg_num_rows($recentBookings) > 0): ?>
+                                            <?php while ($booking = pg_fetch_assoc($recentBookings)): ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($booking['bookingID']); ?></td>
                                                     <td><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A'); ?></td>
@@ -426,8 +437,8 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if ($recentMovies->num_rows > 0): ?>
-                                            <?php while ($movie = $recentMovies->fetch_assoc()): ?>
+                                        <?php if (pg_num_rows($recentMovies) > 0): ?>
+                                            <?php while ($movie = pg_fetch_assoc($recentMovies)): ?>
                                                 <tr>
                                                     <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                                     <td>

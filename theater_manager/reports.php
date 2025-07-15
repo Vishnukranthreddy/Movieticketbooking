@@ -7,98 +7,113 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Fetch all data for reports
-$revenueByMovieResult = $conn->query("
-    SELECT m.movieID, m.movieTitle, COUNT(b.bookingID) as bookingCount, SUM(b.amount) as totalRevenue
+$revenueByMovieQuery = "
+    SELECT m.\"movieID\", m.\"movieTitle\", COUNT(b.\"bookingID\") as bookingCount, SUM(b.amount) as totalRevenue
     FROM movietable m
-    LEFT JOIN bookingtable b ON m.movieID = b.movieID
-    GROUP BY m.movieID, m.movieTitle
+    LEFT JOIN bookingtable b ON m.\"movieID\" = b.\"movieID\"
+    GROUP BY m.\"movieID\", m.\"movieTitle\"
     ORDER BY totalRevenue DESC
     LIMIT 10
-");
+";
+$revenueByMovieResult = pg_query($conn, $revenueByMovieQuery);
+if (!$revenueByMovieResult) {
+    die("Error fetching revenue by movie: " . pg_last_error($conn));
+}
 
-$revenueByDateResult = $conn->query("
-    SELECT DATE_FORMAT(ms.showDate, '%Y-%m-%d') as showDateFormatted,
-           COUNT(b.bookingID) as bookingCount,
+$revenueByDateQuery = "
+    SELECT TO_CHAR(ms.\"showDate\", 'YYYY-MM-DD') as showDateFormatted,
+           COUNT(b.\"bookingID\") as bookingCount,
            SUM(b.amount) as dailyRevenue
     FROM bookingtable b
-    JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
     GROUP BY showDateFormatted
     ORDER BY showDateFormatted DESC
     LIMIT 30
-");
+";
+$revenueByDateResult = pg_query($conn, $revenueByDateQuery);
+if (!$revenueByDateResult) {
+    die("Error fetching revenue by date: " . pg_last_error($conn));
+}
 
-$revenueByTheaterResult = $conn->query("
-    SELECT b.bookingTheatre, COUNT(b.bookingID) as bookingCount, SUM(b.amount) as totalRevenue
+$revenueByTheaterQuery = "
+    SELECT b.\"bookingTheatre\", COUNT(b.\"bookingID\") as bookingCount, SUM(b.amount) as totalRevenue
     FROM bookingtable b
-    GROUP BY b.bookingTheatre
+    GROUP BY b.\"bookingTheatre\"
     ORDER BY totalRevenue DESC
-");
+";
+$revenueByTheaterResult = pg_query($conn, $revenueByTheaterQuery);
+if (!$revenueByTheaterResult) {
+    die("Error fetching revenue by theater: " . pg_last_error($conn));
+}
 
-$popularTimesResult = $conn->query("
-    SELECT ms.showTime, COUNT(b.bookingID) as bookingCount
+$popularTimesQuery = "
+    SELECT ms.\"showTime\", COUNT(b.\"bookingID\") as bookingCount
     FROM bookingtable b
-    JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
-    GROUP BY ms.showTime
+    JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
+    GROUP BY ms.\"showTime\"
     ORDER BY bookingCount DESC
     LIMIT 10
-");
+";
+$popularTimesResult = pg_query($conn, $popularTimesQuery);
+if (!$popularTimesResult) {
+    die("Error fetching popular times: " . pg_last_error($conn));
+}
 
 // Total revenue and bookings
-$totalRevenue = $conn->query("SELECT SUM(amount) as totalRevenue FROM bookingtable")->fetch_assoc()['totalRevenue'] ?? 0;
-$totalBookings = $conn->query("SELECT COUNT(*) as totalBookings FROM bookingtable")->fetch_assoc()['totalBookings'] ?? 0;
+$totalRevenueQuery = "SELECT SUM(amount) as totalRevenue FROM bookingtable";
+$totalRevenue = pg_fetch_assoc(pg_query($conn, $totalRevenueQuery))['totalrevenue'] ?? 0;
+
+$totalBookingsQuery = "SELECT COUNT(*) as totalBookings FROM bookingtable";
+$totalBookings = pg_fetch_assoc(pg_query($conn, $totalBookingsQuery))['totalbookings'] ?? 0;
 $avgRevenue = $totalBookings > 0 ? $totalRevenue / $totalBookings : 0;
 
 // Prepare data for Chart.js in PHP variables
 $revenueByMovieLabels = [];
 $revenueByMovieData = [];
-if ($revenueByMovieResult->num_rows > 0) {
-    while($row = $revenueByMovieResult->fetch_assoc()) {
-        $revenueByMovieLabels[] = $row['movieTitle'];
-        $revenueByMovieData[] = $row['totalRevenue'];
-    }
+while($row = pg_fetch_assoc($revenueByMovieResult)) {
+    $revenueByMovieLabels[] = $row['movietitle'];
+    $revenueByMovieData[] = $row['totalrevenue'];
 }
 
 $revenueByDateLabels = [];
 $revenueByDateData = [];
-if ($revenueByDateResult->num_rows > 0) {
-    while($row = $revenueByDateResult->fetch_assoc()) {
-        $revenueByDateLabels[] = $row['showDateFormatted'];
-        $revenueByDateData[] = $row['dailyRevenue'];
-    }
+while($row = pg_fetch_assoc($revenueByDateResult)) {
+    $revenueByDateLabels[] = $row['showdateformatted'];
+    $revenueByDateData[] = $row['dailyrevenue'];
 }
 
 $revenueByTheaterLabels = [];
 $revenueByTheaterData = [];
-if ($revenueByTheaterResult->num_rows > 0) {
-    while($row = $revenueByTheaterResult->fetch_assoc()) {
-        $revenueByTheaterLabels[] = ucfirst(str_replace('-', ' ', $row['bookingTheatre']));
-        $revenueByTheaterData[] = $row['totalRevenue'];
-    }
+while($row = pg_fetch_assoc($revenueByTheaterResult)) {
+    $revenueByTheaterLabels[] = ucfirst(str_replace('-', ' ', $row['bookingtheatre']));
+    $revenueByTheaterData[] = $row['totalrevenue'];
 }
 
 $popularTimesLabels = [];
 $popularTimesData = [];
-if ($popularTimesResult->num_rows > 0) {
-    while($row = $popularTimesResult->fetch_assoc()) {
-        $popularTimesLabels[] = date('h:i A', strtotime($row['showTime']));
-        $popularTimesData[] = $row['bookingCount'];
-    }
+while($row = pg_fetch_assoc($popularTimesResult)) {
+    $popularTimesLabels[] = date('h:i A', strtotime($row['showtime']));
+    $popularTimesData[] = $row['bookingcount'];
 }
 
-
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -417,11 +432,16 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php while ($movie = $revenueByMovieResult->fetch_assoc()): ?>
+                                <?php
+                                // Reset pointer for pg_fetch_assoc
+                                if (pg_num_rows($revenueByMovieResult) > 0) {
+                                    pg_result_seek($revenueByMovieResult, 0);
+                                }
+                                while ($movie = pg_fetch_assoc($revenueByMovieResult)): ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
-                                        <td><?php echo htmlspecialchars($movie['bookingCount']); ?></td>
-                                        <td>₹<?php echo number_format($movie['totalRevenue'], 2); ?></td>
+                                        <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
+                                        <td><?php echo htmlspecialchars($movie['bookingcount']); ?></td>
+                                        <td>₹<?php echo number_format($movie['totalrevenue'], 2); ?></td>
                                     </tr>
                                 <?php endwhile; ?>
                             </tbody>
@@ -453,11 +473,16 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php while ($theater = $revenueByTheaterResult->fetch_assoc()): ?>
+                                        <?php
+                                        // Reset pointer for pg_fetch_assoc
+                                        if (pg_num_rows($revenueByTheaterResult) > 0) {
+                                            pg_result_seek($revenueByTheaterResult, 0);
+                                        }
+                                        while ($theater = pg_fetch_assoc($revenueByTheaterResult)): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))); ?></td>
-                                                <td><?php echo htmlspecialchars($theater['bookingCount']); ?></td>
-                                                <td>₹<?php echo number_format($theater['totalRevenue'], 2); ?></td>
+                                                <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingtheatre']))); ?></td>
+                                                <td><?php echo htmlspecialchars($theater['bookingcount']); ?></td>
+                                                <td>₹<?php echo number_format($theater['totalrevenue'], 2); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>
@@ -480,10 +505,15 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php while ($time = $popularTimesResult->fetch_assoc()): ?>
+                                        <?php
+                                        // Reset pointer for pg_fetch_assoc
+                                        if (pg_num_rows($popularTimesResult) > 0) {
+                                            pg_result_seek($popularTimesResult, 0);
+                                        }
+                                        while ($time = pg_fetch_assoc($popularTimesResult)): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showTime']))); ?></td>
-                                                <td><?php echo htmlspecialchars($time['bookingCount']); ?></td>
+                                                <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showtime']))); ?></td>
+                                                <td><?php echo htmlspecialchars($time['bookingcount']); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>

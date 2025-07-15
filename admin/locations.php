@@ -3,19 +3,24 @@ session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
 if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
-    header("Location: index.php");
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Handle location deletion
@@ -25,37 +30,31 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $locationId = $_GET['delete'];
     
     // Check if the location exists
-    $checkQuery = $conn->prepare("SELECT locationID FROM locations WHERE locationID = ?");
-    $checkQuery->bind_param("i", $locationId);
-    $checkQuery->execute();
-    $result = $checkQuery->get_result();
+    $checkQuery = "SELECT \"locationID\" FROM locations WHERE \"locationID\" = $1";
+    $checkResult = pg_query_params($conn, $checkQuery, array($locationId));
     
-    if ($result->num_rows > 0) {
+    if ($checkResult && pg_num_rows($checkResult) > 0) {
         // Check if location is used in movies
-        $checkMoviesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movietable WHERE locationID = ?");
-        $checkMoviesQuery->bind_param("i", $locationId);
-        $checkMoviesQuery->execute();
-        $moviesCount = $checkMoviesQuery->get_result()->fetch_assoc()['count'];
-        $checkMoviesQuery->close();
+        $checkMoviesQuery = "SELECT COUNT(*) as count FROM movietable WHERE \"locationID\" = $1";
+        $checkMoviesResult = pg_query_params($conn, $checkMoviesQuery, array($locationId));
+        $moviesCount = pg_fetch_assoc($checkMoviesResult)['count'];
         
         if ($moviesCount > 0) {
             $errorMessage = "Cannot delete location. It is associated with " . $moviesCount . " movie(s).";
         } else {
             // Delete the location
-            $deleteQuery = $conn->prepare("DELETE FROM locations WHERE locationID = ?");
-            $deleteQuery->bind_param("i", $locationId);
+            $deleteQuery = "DELETE FROM locations WHERE \"locationID\" = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($locationId));
             
-            if ($deleteQuery->execute()) {
+            if ($deleteResult) {
                 $successMessage = "Location deleted successfully!";
             } else {
-                $errorMessage = "Error deleting location: " . $conn->error;
+                $errorMessage = "Error deleting location: " . pg_last_error($conn);
             }
-            $deleteQuery->close();
         }
     } else {
         $errorMessage = "Location not found!";
     }
-    $checkQuery->close();
 }
 
 // Handle location addition
@@ -65,15 +64,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_location'])) {
     $locationCountry = $_POST['locationCountry'];
     $locationStatus = $_POST['locationStatus'];
     
-    $stmt = $conn->prepare("INSERT INTO locations (locationName, locationState, locationCountry, locationStatus) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("ssss", $locationName, $locationState, $locationCountry, $locationStatus);
+    $insertQuery = "INSERT INTO locations (\"locationName\", \"locationState\", \"locationCountry\", \"locationStatus\") VALUES ($1, $2, $3, $4)";
+    $insertResult = pg_query_params($conn, $insertQuery, array($locationName, $locationState, $locationCountry, $locationStatus));
     
-    if ($stmt->execute()) {
+    if ($insertResult) {
         $successMessage = "Location added successfully!";
     } else {
-        $errorMessage = "Error adding location: " . $stmt->error;
+        $errorMessage = "Error adding location: " . pg_last_error($conn);
     }
-    $stmt->close();
 }
 
 // Handle location update
@@ -84,21 +82,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_location'])) {
     $locationCountry = $_POST['locationCountry'];
     $locationStatus = $_POST['locationStatus'];
     
-    $stmt = $conn->prepare("UPDATE locations SET locationName = ?, locationState = ?, locationCountry = ?, locationStatus = ? WHERE locationID = ?");
-    $stmt->bind_param("ssssi", $locationName, $locationState, $locationCountry, $locationStatus, $locationId);
+    $updateQuery = "UPDATE locations SET \"locationName\" = $1, \"locationState\" = $2, \"locationCountry\" = $3, \"locationStatus\" = $4 WHERE \"locationID\" = $5";
+    $updateResult = pg_query_params($conn, $updateQuery, array($locationName, $locationState, $locationCountry, $locationStatus, $locationId));
     
-    if ($stmt->execute()) {
+    if ($updateResult) {
         $successMessage = "Location updated successfully!";
     } else {
-        $errorMessage = "Error updating location: " . $stmt->error;
+        $errorMessage = "Error updating location: " . pg_last_error($conn);
     }
-    $stmt->close();
 }
 
 // Get all locations
-$locations = $conn->query("SELECT * FROM locations ORDER BY locationName");
+$locationsQuery = "SELECT * FROM locations ORDER BY \"locationName\"";
+$locations = pg_query($conn, $locationsQuery);
+if (!$locations) {
+    die("Error fetching locations: " . pg_last_error($conn));
+}
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -213,7 +214,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -230,7 +231,7 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
+                            <a class="nav-link" href="../content_manager/movies.php">
                                 <i class="fas fa-film"></i>
                                 Movies
                             </a>
@@ -259,22 +260,30 @@ $conn->close();
                                 Bookings
                             </a>
                         </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees Users, Reports, Settings in Theater Manager sidebar ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="users.php">
+                            <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
                                 Users
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="reports.php">
+                            <a class="nav-link" href="../admin/reports.php">
                                 <i class="fas fa-chart-bar"></i>
-                                Reports
+                                All Reports
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
+                            <a class="nav-link" href="../admin/settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
+                            </a>
+                        </li>
+                        <?php endif; ?>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Theater Reports
                             </a>
                         </li>
                     </ul>
@@ -321,8 +330,8 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if ($locations->num_rows > 0): ?>
-                                    <?php while ($location = $locations->fetch_assoc()): ?>
+                                <?php if (pg_num_rows($locations) > 0): ?>
+                                    <?php while ($location = pg_fetch_assoc($locations)): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($location['locationID']); ?></td>
                                             <td><?php echo htmlspecialchars($location['locationName']); ?></td>

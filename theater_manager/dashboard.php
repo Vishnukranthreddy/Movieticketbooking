@@ -7,22 +7,27 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Get counts relevant to Theater Manager
-$theaterCount = $conn->query("SELECT COUNT(*) as count FROM theaters")->fetch_assoc()['count'];
-$scheduleCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules")->fetch_assoc()['count'];
-$bookingCount = $conn->query("SELECT COUNT(*) as count FROM bookingtable")->fetch_assoc()['count'];
-$movieCount = $conn->query("SELECT COUNT(*) as count FROM movietable")->fetch_assoc()['count']; // Also show total movies
+$theaterCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM theaters"))['count'];
+$scheduleCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM movie_schedules"))['count'];
+$bookingCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM bookingtable"))['count'];
+$movieCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM movietable"))['count']; // Also show total movies
 
 
 // Get recent schedules
@@ -36,7 +41,10 @@ $recentSchedulesQuery = "
     JOIN theaters t ON h.theaterID = t.theaterID
     ORDER BY ms.showDate DESC, ms.showTime DESC LIMIT 5
 ";
-$recentSchedules = $conn->query($recentSchedulesQuery);
+$recentSchedules = pg_query($conn, $recentSchedulesQuery);
+if (!$recentSchedules) {
+    die("Error fetching recent schedules: " . pg_last_error($conn));
+}
 
 // Get recent bookings
 $recentBookingsQuery = "
@@ -48,10 +56,12 @@ $recentBookingsQuery = "
     LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
     ORDER BY b.bookingID DESC LIMIT 5
 ";
-$recentBookings = $conn->query($recentBookingsQuery);
+$recentBookings = pg_query($conn, $recentBookingsQuery);
+if (!$recentBookings) {
+    die("Error fetching recent bookings: " . pg_last_error($conn));
+}
 
-
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -297,6 +307,12 @@ $conn->close();
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
                         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
                             <span>Content Management (Super Admin)</span>
                         </h6>
@@ -363,14 +379,14 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if ($recentSchedules->num_rows > 0): ?>
-                                            <?php while ($schedule = $recentSchedules->fetch_assoc()): ?>
+                                        <?php if (pg_num_rows($recentSchedules) > 0): ?>
+                                            <?php while ($schedule = pg_fetch_assoc($recentSchedules)): ?>
                                                 <tr>
-                                                    <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
-                                                    <td><?php echo htmlspecialchars($schedule['movieTitle'] ?? 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($schedule['theaterName'] ?? 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($schedule['showDate'] ? date('Y-m-d', strtotime($schedule['showDate'])) : 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($schedule['showTime'] ? date('H:i', strtotime($schedule['showTime'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['scheduleid']); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['movietitle'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['theatername'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['showdate'] ? date('Y-m-d', strtotime($schedule['showdate'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($schedule['showtime'] ? date('H:i', strtotime($schedule['showtime'])) : 'N/A'); ?></td>
                                                 </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>
@@ -400,15 +416,15 @@ $conn->close();
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if ($recentBookings->num_rows > 0): ?>
-                                            <?php while ($booking = $recentBookings->fetch_assoc()): ?>
+                                        <?php if (pg_num_rows($recentBookings) > 0): ?>
+                                            <?php while ($booking = pg_fetch_assoc($recentBookings)): ?>
                                                 <tr>
-                                                    <td><?php echo htmlspecialchars($booking['bookingID']); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['bookingFName'] . ' ' . $booking['bookingLName']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['bookingid']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['movietitle'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['bookingfname'] . ' ' . $booking['bookinglname']); ?></td>
                                                     <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['showDate'] ? date('Y-m-d', strtotime($booking['showDate'])) : 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['showTime'] ? date('H:i', strtotime($booking['showTime'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showdate'] ? date('Y-m-d', strtotime($booking['showdate'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showtime'] ? date('H:i', strtotime($booking['showtime'])) : 'N/A'); ?></td>
                                                 </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>

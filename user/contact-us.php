@@ -1,15 +1,20 @@
 <?php
 session_start();
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $message = '';
@@ -20,18 +25,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_feedback'])) {
     $eMail = $_POST['eMail'];
     $feedback = $_POST['feedback'];
 
-    $stmt = $conn->prepare("INSERT INTO feedbacktable (senderfName, senderlName, sendereMail, senderfeedback) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("ssss", $fName, $lName, $eMail, $feedback);
+    // Use pg_query_params for prepared statements in PostgreSQL
+    $query = "INSERT INTO feedbacktable (senderfName, senderlName, sendereMail, senderfeedback) VALUES ($1, $2, $3, $4)";
+    $result = pg_query_params($conn, $query, array($fName, $lName, $eMail, $feedback));
 
-    if ($stmt->execute()) {
+    if ($result) {
         $message = '<div class="bg-green-600 text-white p-3 rounded-lg mb-4">Your message has been sent successfully! We will get back to you soon.</div>';
     } else {
-        $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error sending message: ' . $stmt->error . '</div>';
+        $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error sending message: ' . pg_last_error($conn) . '</div>';
     }
-    $stmt->close();
 }
 
-$conn->close();
+// Close PostgreSQL connection
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>

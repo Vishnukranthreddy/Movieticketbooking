@@ -3,23 +3,32 @@ session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Content Manager (roleID 3)
 if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 3)) {
-    header("Location: index.php");
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Get all locations for dropdown
-$locations = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
+$locationsQuery = "SELECT \"locationID\", \"locationName\" FROM locations WHERE \"locationStatus\" = 'active' ORDER BY \"locationName\"";
+$locations = pg_query($conn, $locationsQuery);
+if (!$locations) {
+    die("Error fetching locations: " . pg_last_error($conn));
+}
 
 // Process form submission
 $errorMessage = '';
@@ -38,15 +47,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $privateHall = $_POST['privateHall'] ?: 0; // Default to 0 if not set
     
     // Handle file upload
-    $targetDir = "../img/"; // Path relative to the admin folder
+    $targetDir = "../../img/"; // Path relative to content_manager folder (two levels up)
     $fileName = basename($_FILES["movieImage"]["name"]);
-    $targetFilePath = $targetDir . $fileName;
+    $uniqueFileName = uniqid() . "_" . $fileName; // Generate a unique file name
+    $targetFilePath = $targetDir . $uniqueFileName;
     $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
     $uploadOk = 1;
     
     // Check if image file is a actual image or fake image
     if(isset($_FILES["movieImage"]["tmp_name"]) && $_FILES["movieImage"]["tmp_name"] != "") {
-        $check = getimagesize($_FILES["movieImage"]["tmp_name"]);
+        $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @ to suppress warnings
         if($check !== false) {
             $uploadOk = 1;
         } else {
@@ -79,30 +89,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // if everything is ok, try to upload file
         if (move_uploaded_file($_FILES["movieImage"]["tmp_name"], $targetFilePath)) {
             // File uploaded successfully, now insert movie data
-            $movieImg = "img/" . $fileName; // Path to store in database
+            $movieImg = "img/" . $uniqueFileName; // Path to store in database (relative to project root)
 
-            $stmt = $conn->prepare("INSERT INTO movietable (movieImg, movieTitle, movieGenre, movieDuration, movieRelDate, movieDirector, movieActors, locationID, mainhall, viphall, privatehall) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            // 's' for string, 'i' for integer, 's' for string for movieRelDate (date can be treated as string for bind_param)
-            $stmt->bind_param("sssssssiiss", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall);
+            $insertQuery = "INSERT INTO movietable (\"movieImg\", \"movieTitle\", \"movieGenre\", \"movieDuration\", \"movieRelDate\", \"movieDirector\", \"movieActors\", \"locationID\", mainhall, viphall, privatehall) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
+            $insertResult = pg_query_params($conn, $insertQuery, array($movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall));
             
-            if ($stmt->execute()) {
+            if ($insertResult) {
                 $successMessage = "Movie added successfully!";
                 // Redirect to movies page after successful addition
                 header("Location: movies.php?success=1");
                 exit();
             } else {
-                $errorMessage = "Error: " . $stmt->error;
+                $errorMessage = "Error: " . pg_last_error($conn);
                 // If DB insert fails, consider deleting the uploaded file to clean up
-                unlink($targetFilePath); 
+                if (file_exists($targetFilePath)) {
+                    unlink($targetFilePath); 
+                }
             }
-            $stmt->close();
         } else {
             $errorMessage = "Sorry, there was an error uploading your file.";
         }
     }
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -113,7 +123,7 @@ $conn->close();
     <title>Add New Movie - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -211,7 +221,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Adjusted path -->
             </li>
         </ul>
     </nav>
@@ -221,6 +231,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -233,48 +246,62 @@ $conn->close();
                                 Movies
                             </a>
                         </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Content Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="theaters.php">
-                                <i class="fas fa-building"></i>
-                                Theaters
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
-                                <i class="fas fa-map-marker-alt"></i>
-                                Locations
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="schedules.php">
-                                <i class="fas fa-calendar-alt"></i>
-                                Schedules
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="bookings.php">
-                                <i class="fas fa-ticket-alt"></i>
-                                Bookings
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="users.php">
+                            <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
                                 Users
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="reports.php">
-                                <i class="fas fa-chart-bar"></i>
-                                Reports
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
+                            <a class="nav-link" href="../admin/settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
                             </a>
                         </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/theaters.php">
+                                <i class="fas fa-building"></i>
+                                Theaters
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/schedules.php">
+                                <i class="fas fa-calendar-alt"></i>
+                                Schedules
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -336,7 +363,12 @@ $conn->close();
                                     <label for="locationID">Location</label>
                                     <select class="form-control" id="locationID" name="locationID">
                                         <option value="">Select Location (Optional)</option>
-                                        <?php while ($location = $locations->fetch_assoc()): ?>
+                                        <?php 
+                                        // Reset location results pointer if already fetched
+                                        if (pg_num_rows($locations) > 0) {
+                                            pg_result_seek($locations, 0);
+                                        }
+                                        while ($location = pg_fetch_assoc($locations)): ?>
                                             <option value="<?php echo htmlspecialchars($location['locationID']); ?>">
                                                 <?php echo htmlspecialchars($location['locationName']); ?>
                                             </option>
@@ -352,7 +384,7 @@ $conn->close();
                             </div>
                         </div>
                         
-                        <!-- Hall Price inputs (if still needed, otherwise remove) -->
+                        <!-- Hall Price inputs -->
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="form-group">

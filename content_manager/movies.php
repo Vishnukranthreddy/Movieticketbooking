@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Handle movie deletion
@@ -25,38 +30,54 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $movieId = $_GET['delete'];
     
     // Check if the movie exists
-    $checkQuery = $conn->prepare("SELECT movieID FROM movietable WHERE movieID = ?");
-    $checkQuery->bind_param("i", $movieId);
-    $checkQuery->execute();
-    $result = $checkQuery->get_result();
+    $checkQuery = "SELECT \"movieID\" FROM movietable WHERE \"movieID\" = $1";
+    $checkResult = pg_query_params($conn, $checkQuery, array($movieId));
     
-    if ($result->num_rows > 0) {
-        // IMPORTANT: Check for foreign key dependencies before deleting!
+    if ($checkResult && pg_num_rows($checkResult) > 0) {
+        // Check for foreign key dependencies before deleting!
         // E.g., check movie_schedules table
-        $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE movieID = ?");
-        $checkSchedulesQuery->bind_param("i", $movieId);
-        $checkSchedulesQuery->execute();
-        $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
-        $checkSchedulesQuery->close();
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"movieID\" = $1";
+        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
         if ($schedulesCount > 0) {
             $errorMessage = "Cannot delete movie. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
         } else {
+            // Get movie image path before deletion to remove the file
+            $stmtImgQuery = "SELECT \"movieImg\" FROM movietable WHERE \"movieID\" = $1";
+            $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($movieId));
+            $movieImgPath = null;
+            if ($stmtImgResult && pg_num_rows($stmtImgResult) > 0) {
+                $row = pg_fetch_assoc($stmtImgResult);
+                $movieImgPath = $row['movieImg'];
+            }
+
             // Delete the movie
-            $deleteQuery = $conn->prepare("DELETE FROM movietable WHERE movieID = ?");
-            $deleteQuery->bind_param("i", $movieId);
+            $deleteQuery = "DELETE FROM movietable WHERE \"movieID\" = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
             
-            if ($deleteQuery->execute()) {
+            if ($deleteResult) {
+                // If ON DELETE CASCADE is set up for movie_schedules,
+                // then associated schedules and their related bookings (if FK from bookings to schedules)
+                // should also be deleted automatically.
+                
+                // Delete the associated image file if it exists
+                // Path needs to be relative to the script's location or absolute
+                if ($movieImgPath && file_exists("../../" . $movieImgPath)) { // Two levels up to project root, then img/
+                    // Ensure the path is within the expected img directory to prevent directory traversal
+                    if (strpos($movieImgPath, 'img/') === 0 && realpath("../../" . $movieImgPath)) {
+                        unlink("../../" . $movieImgPath);
+                    }
+                }
+                
                 $successMessage = "Movie deleted successfully!";
             } else {
-                $errorMessage = "Error deleting movie: " . $conn->error;
+                $errorMessage = "Error deleting movie: " . pg_last_error($conn);
             }
-            $deleteQuery->close();
         }
     } else {
         $errorMessage = "Movie not found!";
     }
-    $checkQuery->close();
 }
 
 // Get all movies with pagination
@@ -68,57 +89,40 @@ $offset = ($page - 1) * $recordsPerPage;
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
 $params = [];
-$types = '';
+$param_index = 1;
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    $searchCondition = "WHERE movieTitle LIKE ? OR movieGenre LIKE ? OR movieDirector LIKE ?";
+    $searchCondition = "WHERE \"movieTitle\" ILIKE $" . ($param_index++) . " OR \"movieGenre\" ILIKE $" . ($param_index++) . " OR \"movieDirector\" ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam, $searchParam];
-    $types = "sss";
 }
 
 // Count total records for pagination
-$countQuery = "SELECT COUNT(*) as total FROM movietable $searchCondition";
+$countQuery = "SELECT COUNT(*) as total FROM movietable " . $searchCondition;
 
-$stmtCount = $conn->prepare($countQuery);
-if (!empty($searchCondition)) {
-    $stmtCount->bind_param($types, ...$params);
+$stmtCountResult = pg_query_params($conn, $countQuery, $params);
+if (!$stmtCountResult) {
+    die("Error counting movies: " . pg_last_error($conn));
 }
-$stmtCount->execute();
-$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
-$stmtCount->close();
-
+$totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get movies for current page
-$query = "SELECT m.*, l.locationName 
+$query = "SELECT m.*, l.\"locationName\" 
           FROM movietable m 
-          LEFT JOIN locations l ON m.locationID = l.locationID 
-          $searchCondition 
-          ORDER BY m.movieID DESC 
-          LIMIT ?, ?";
+          LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" 
+          " . $searchCondition . " 
+          ORDER BY m.\"movieID\" DESC 
+          LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
-$stmt = $conn->prepare($query);
+$query_params = array_merge($params, [$recordsPerPage, $offset]);
+$movies = pg_query_params($conn, $query, $query_params);
 
-// Rebind parameters for the main query
-$query_params = $params; // Copy search parameters
-$query_types = $types; // Copy search types
-
-$query_params[] = $offset;
-$query_params[] = $recordsPerPage;
-$query_types .= "ii";
-
-if (!empty($searchCondition)) {
-    $stmt->bind_param($query_types, ...$query_params);
-} else {
-    $stmt->bind_param("ii", $offset, $recordsPerPage);
+if (!$movies) {
+    die("Error fetching movies: " . pg_last_error($conn));
 }
 
-$stmt->execute();
-$movies = $stmt->get_result();
-$stmt->close();
-
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -377,26 +381,26 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if ($movies->num_rows > 0): ?>
-                                    <?php while ($movie = $movies->fetch_assoc()): ?>
+                                <?php if (pg_num_rows($movies) > 0): ?>
+                                    <?php while ($movie = pg_fetch_assoc($movies)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
                                             <td>
-                                                <img src="<?php echo '../../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image">
+                                                <img src="<?php echo '../../' . htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image">
                                             </td>
-                                            <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
-                                            <td><?php echo htmlspecialchars($movie['movieRelDate']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
+                                            <td><?php echo htmlspecialchars($movie['moviereldate']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="delete_movie.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules and bookings!')">
+                                                <a href="delete_movie.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
-                                                <a href="../../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-info" target="_blank">
+                                                <a href="../../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-info" target="_blank">
                                                     <i class="fas fa-eye"></i>
                                                 </a>
                                             </td>

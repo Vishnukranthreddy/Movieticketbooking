@@ -25,10 +25,10 @@ if (!$conn) {
 
 // Revenue by movie
 $revenueByMovieQuery = "
-    SELECT m.movieid, m.movietitle, COUNT(b.bookingid) as bookingCount, SUM(b.amount) as totalRevenue
+    SELECT m.\"movieID\", m.\"movieTitle\", COUNT(b.\"bookingID\") as bookingCount, SUM(b.amount) as totalRevenue
     FROM movietable m
-    LEFT JOIN bookingtable b ON m.movieid = b.movieid
-    GROUP BY m.movieid, m.movietitle
+    LEFT JOIN bookingtable b ON m.\"movieID\" = b.\"movieID\"
+    GROUP BY m.\"movieID\", m.\"movieTitle\"
     ORDER BY totalRevenue DESC
     LIMIT 10
 ";
@@ -39,11 +39,11 @@ if (!$revenueByMovie) {
 
 // Revenue by date
 $revenueByDateQuery = "
-    SELECT TO_CHAR(ms.showdate, 'YYYY-MM-DD') as showDateFormatted,
-           COUNT(b.bookingid) as bookingCount,
+    SELECT TO_CHAR(ms.\"showDate\", 'YYYY-MM-DD') as showDateFormatted,
+           COUNT(b.\"bookingID\") as bookingCount,
            SUM(b.amount) as dailyRevenue
     FROM bookingtable b
-    JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
+    JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
     GROUP BY showDateFormatted
     ORDER BY showDateFormatted DESC
     LIMIT 30
@@ -58,9 +58,9 @@ if (!$revenueByDate) {
 // If bookingTheatre directly stores theater names, this query is fine.
 // If it stores theater IDs, a JOIN is needed. Assuming it stores names for simplicity here.
 $revenueByTheaterQuery = "
-    SELECT b.bookingtheatre, COUNT(b.bookingid) as bookingCount, SUM(b.amount) as totalRevenue
+    SELECT b.\"bookingTheatre\", COUNT(b.\"bookingID\") as bookingCount, SUM(b.amount) as totalRevenue
     FROM bookingtable b
-    GROUP BY b.bookingtheatre
+    GROUP BY b.\"bookingTheatre\"
     ORDER BY totalRevenue DESC
 ";
 $revenueByTheater = pg_query($conn, $revenueByTheaterQuery);
@@ -70,10 +70,10 @@ if (!$revenueByTheater) {
 
 // Popular show times
 $popularTimesQuery = "
-    SELECT ms.showtime, COUNT(b.bookingid) as bookingCount
+    SELECT ms.\"showTime\", COUNT(b.\"bookingID\") as bookingCount
     FROM bookingtable b
-    JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
-    GROUP BY ms.showtime
+    JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
+    GROUP BY ms.\"showTime\"
     ORDER BY bookingCount DESC
     LIMIT 10
 ";
@@ -402,14 +402,14 @@ pg_close($conn);
                             <tbody>
                                 <?php
                                 // Reset pointer for PostgreSQL result set
-                                if ($revenueByMovie && pg_num_rows($revenueByMovie) > 0) {
+                                if (pg_num_rows($revenueByMovie) > 0) {
                                     pg_result_seek($revenueByMovie, 0);
                                 }
                                 while ($movie = pg_fetch_assoc($revenueByMovie)): ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
-                                        <td><?php echo htmlspecialchars($movie['bookingcount']); ?></td>
-                                        <td>₹<?php echo number_format($movie['totalrevenue'], 2); ?></td>
+                                        <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                        <td><?php echo htmlspecialchars($movie['bookingCount']); ?></td>
+                                        <td>₹<?php echo number_format($movie['totalRevenue'], 2); ?></td>
                                     </tr>
                                 <?php endwhile; ?>
                             </tbody>
@@ -443,14 +443,14 @@ pg_close($conn);
                                     <tbody>
                                         <?php
                                         // Reset pointer for PostgreSQL result set
-                                        if ($revenueByTheater && pg_num_rows($revenueByTheater) > 0) {
+                                        if (pg_num_rows($revenueByTheater) > 0) {
                                             pg_result_seek($revenueByTheater, 0);
                                         }
                                         while ($theater = pg_fetch_assoc($revenueByTheater)): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingtheatre']))); ?></td>
-                                                <td><?php echo htmlspecialchars($theater['bookingcount']); ?></td>
-                                                <td>₹<?php echo number_format($theater['totalrevenue'], 2); ?></td>
+                                                <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))); ?></td>
+                                                <td><?php echo htmlspecialchars($theater['bookingCount']); ?></td>
+                                                <td>₹<?php echo number_format($theater['totalRevenue'], 2); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>
@@ -475,13 +475,13 @@ pg_close($conn);
                                     <tbody>
                                         <?php
                                         // Reset pointer for PostgreSQL result set
-                                        if ($popularTimes && pg_num_rows($popularTimes) > 0) {
+                                        if (pg_num_rows($popularTimes) > 0) {
                                             pg_result_seek($popularTimes, 0);
                                         }
                                         while ($time = pg_fetch_assoc($popularTimes)): ?>
                                             <tr>
-                                                <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showtime']))); ?></td>
-                                                <td><?php echo htmlspecialchars($time['bookingcount']); ?></td>
+                                                <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showTime']))); ?></td>
+                                                <td><?php echo htmlspecialchars($time['bookingCount']); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>
@@ -502,22 +502,22 @@ pg_close($conn);
         const revenueByMovieLabels = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($revenueByMovie && pg_num_rows($revenueByMovie) > 0) {
+            if (pg_num_rows($revenueByMovie) > 0) {
                 pg_result_seek($revenueByMovie, 0);
             }
             while ($movie = pg_fetch_assoc($revenueByMovie)) {
-                echo "'" . addslashes($movie['movietitle']) . "', ";
+                echo "'" . addslashes($movie['movieTitle']) . "', ";
             }
             ?>
         ];
         const revenueByMovieData = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($revenueByMovie && pg_num_rows($revenueByMovie) > 0) {
+            if (pg_num_rows($revenueByMovie) > 0) {
                 pg_result_seek($revenueByMovie, 0);
             }
             while ($movie = pg_fetch_assoc($revenueByMovie)) {
-                echo $movie['totalrevenue'] . ", ";
+                echo $movie['totalRevenue'] . ", ";
             }
             ?>
         ];
@@ -525,22 +525,22 @@ pg_close($conn);
         const revenueByDateLabels = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($revenueByDate && pg_num_rows($revenueByDate) > 0) {
+            if (pg_num_rows($revenueByDate) > 0) {
                 pg_result_seek($revenueByDate, 0);
             }
             while ($date = pg_fetch_assoc($revenueByDate)) {
-                echo "'" . addslashes($date['showdateformatted']) . "', ";
+                echo "'" . addslashes($date['showDateFormatted']) . "', ";
             }
             ?>
         ];
         const revenueByDateData = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($revenueByDate && pg_num_rows($revenueByDate) > 0) {
+            if (pg_num_rows($revenueByDate) > 0) {
                 pg_result_seek($revenueByDate, 0);
             }
             while ($date = pg_fetch_assoc($revenueByDate)) {
-                echo $date['dailyrevenue'] . ", ";
+                echo $date['dailyRevenue'] . ", ";
             }
             ?>
         ];
@@ -548,22 +548,22 @@ pg_close($conn);
         const revenueByTheaterLabels = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($revenueByTheater && pg_num_rows($revenueByTheater) > 0) {
+            if (pg_num_rows($revenueByTheater) > 0) {
                 pg_result_seek($revenueByTheater, 0);
             }
             while ($theater = pg_fetch_assoc($revenueByTheater)) {
-                echo "'" . addslashes(ucfirst(str_replace('-', ' ', $theater['bookingtheatre']))) . "', ";
+                echo "'" . addslashes(ucfirst(str_replace('-', ' ', $theater['bookingTheatre']))) . "', ";
             }
             ?>
         ];
         const revenueByTheaterData = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($revenueByTheater && pg_num_rows($revenueByTheater) > 0) {
+            if (pg_num_rows($revenueByTheater) > 0) {
                 pg_result_seek($revenueByTheater, 0);
             }
             while ($theater = pg_fetch_assoc($revenueByTheater)) {
-                echo $theater['totalrevenue'] . ", ";
+                echo $theater['totalRevenue'] . ", ";
             }
             ?>
         ];
@@ -571,22 +571,22 @@ pg_close($conn);
         const popularTimesLabels = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($popularTimes && pg_num_rows($popularTimes) > 0) {
+            if (pg_num_rows($popularTimes) > 0) {
                 pg_result_seek($popularTimes, 0);
             }
             while ($time = pg_fetch_assoc($popularTimes)) {
-                echo "'" . addslashes(date('h:i A', strtotime($time['showtime']))) . "', ";
+                echo "'" . addslashes(date('h:i A', strtotime($time['showTime']))) . "', ";
             }
             ?>
         ];
         const popularTimesData = [
             <?php
             // Reset pointer for PostgreSQL result set
-            if ($popularTimes && pg_num_rows($popularTimes) > 0) {
+            if (pg_num_rows($popularTimes) > 0) {
                 pg_result_seek($popularTimes, 0);
             }
             while ($time = pg_fetch_assoc($popularTimes)) {
-                echo $time['bookingcount'] . ", ";
+                echo $time['bookingCount'] . ", ";
             }
             ?>
         ];

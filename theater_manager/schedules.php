@@ -66,6 +66,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $price = $_POST['price'];
     $status = $_POST['status'];
     
+    // Note: movieID and hallID are foreign keys, ensure they are correctly referenced
     $insertQuery = "INSERT INTO movie_schedules (\"movieID\", \"hallID\", \"showDate\", \"showTime\", price, \"scheduleStatus\") VALUES ($1, $2, $3, $4, $5, $6)";
     $insertResult = pg_query_params($conn, $insertQuery, array($movieId, $hallId, $showDate, $showTime, $price, $status));
     
@@ -77,7 +78,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
 }
 
 // Get all movies for dropdown
-$moviesQuery = "SELECT \"movieID\", \"movieTitle\" FROM movietable ORDER BY \"movieTitle\"";
+// Changed "movieID" to "movieid" and "movieTitle" to "movietitle" based on the error hint
+$moviesQuery = "SELECT movieid, movietitle FROM movietable ORDER BY movietitle";
 $movies = pg_query($conn, $moviesQuery);
 if (!$movies) {
     die("Error fetching movies: " . pg_last_error($conn));
@@ -109,7 +111,8 @@ $param_index = 1;
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    $searchCondition = "WHERE m.\"movieTitle\" ILIKE $" . ($param_index++) . " OR t.\"theaterName\" ILIKE $" . ($param_index++) . "";
+    // Changed "movieTitle" to "movietitle"
+    $searchCondition = "WHERE m.movietitle ILIKE $" . ($param_index++) . " OR t.\"theaterName\" ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam];
 }
 
@@ -117,7 +120,7 @@ if (!empty($search)) {
 $countQuery = "
     SELECT COUNT(*) as total 
     FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
+    JOIN movietable m ON ms.\"movieID\" = m.movieid -- Changed \"movieID\" to movieid
     JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
     JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
     " . $searchCondition;
@@ -131,9 +134,9 @@ $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get schedules for current page
 $query = "
-    SELECT ms.*, m.\"movieTitle\", h.\"hallName\", h.\"hallType\", t.\"theaterName\"
+    SELECT ms.*, m.movietitle, h.\"hallName\", h.\"hallType\", t.\"theaterName\" -- Changed \"movieTitle\" to movietitle
     FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
+    JOIN movietable m ON ms.\"movieID\" = m.movieid -- Changed \"movieID\" to movieid
     JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
     JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
     " . $searchCondition . "
@@ -432,7 +435,7 @@ pg_close($conn);
                                     <?php while ($schedule = pg_fetch_assoc($schedules)): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['movieTitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['movietitle']); ?></td> <!-- Changed to movietitle -->
                                             <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
                                             <td>
                                                 <?php echo htmlspecialchars($schedule['hallName']); ?> 
@@ -521,8 +524,8 @@ pg_close($conn);
                                     pg_result_seek($movies, 0);
                                 }
                                 while ($movie = pg_fetch_assoc($movies)): ?>
-                                    <option value="<?php echo htmlspecialchars($movie['movieID']); ?>">
-                                        <?php echo htmlspecialchars($movie['movieTitle']); ?>
+                                    <option value="<?php echo htmlspecialchars($movie['movieid']); ?>"> <!-- Changed to movieid -->
+                                        <?php echo htmlspecialchars($movie['movietitle']); ?> <!-- Changed to movietitle -->
                                     </option>
                                 <?php endwhile; ?>
                             </select>

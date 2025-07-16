@@ -23,50 +23,27 @@ if (!$conn) {
     die("Connection failed: " . pg_last_error());
 }
 
-// Get theater ID from URL
-$theaterId = isset($_GET['theater_id']) ? (int)$_GET['theater_id'] : 0;
-$theaterName = "N/A";
-$halls = null; // Initialize halls variable
-$errorMessage = '';
-$successMessage = '';
-
-// Fetch theater name if theaterId is provided
-if ($theaterId > 0) {
-    // Corrected column name to lowercase quoted "theatername"
-    $stmtTheaterQuery = "SELECT \"theatername\" FROM theaters WHERE \"theaterid\" = $1";
-    $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
-    if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
-        $rowTheater = pg_fetch_assoc($stmtTheaterResult);
-        $theaterName = $rowTheater['theatername'];
-    } else {
-        $errorMessage = "Theater not found for ID: " . $theaterId;
-        $theaterId = 0; // Invalidate theaterId if not found
-    }
-} else {
-    // This message is displayed if no theater_id is passed to schedules.php
-    $errorMessage = "No theater ID provided. Please select a theater from the Theaters list to manage its schedules.";
-}
-
-
 // Handle schedule deletion
+$successMessage = '';
+$errorMessage = '';
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $scheduleId = $_GET['delete'];
     
-    // Check if the schedule exists - using lowercase quoted "scheduleid"
-    $checkQuery = "SELECT \"scheduleid\" FROM movie_schedules WHERE \"scheduleid\" = $1";
+    // Check if the schedule exists
+    $checkQuery = "SELECT \"scheduleID\" FROM movie_schedules WHERE \"scheduleID\" = $1";
     $checkResult = pg_query_params($conn, $checkQuery, array($scheduleId));
     
     if ($checkResult && pg_num_rows($checkResult) > 0) {
-        // Check if schedule is used in bookings - using lowercase quoted "scheduleid"
-        $checkBookingsQuery = "SELECT COUNT(*) as count FROM bookingtable WHERE \"scheduleid\" = $1";
+        // Check if schedule is used in bookings
+        $checkBookingsQuery = "SELECT COUNT(*) as count FROM bookingtable WHERE \"scheduleID\" = $1";
         $checkBookingsResult = pg_query_params($conn, $checkBookingsQuery, array($scheduleId));
         $bookingsCount = pg_fetch_assoc($checkBookingsResult)['count'];
         
         if ($bookingsCount > 0) {
             $errorMessage = "Cannot delete schedule. It is associated with " . $bookingsCount . " booking(s).";
         } else {
-            // Delete the schedule - using lowercase quoted "scheduleid"
-            $deleteQuery = "DELETE FROM movie_schedules WHERE \"scheduleid\" = $1";
+            // Delete the schedule
+            $deleteQuery = "DELETE FROM movie_schedules WHERE \"scheduleID\" = $1";
             $deleteResult = pg_query_params($conn, $deleteQuery, array($scheduleId));
             
             if ($deleteResult) {
@@ -78,9 +55,6 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     } else {
         $errorMessage = "Schedule not found!";
     }
-    // Redirect to prevent re-deletion on refresh and to reflect changes
-    header("Location: schedules.php?theater_id=" . $theaterId . "&success=" . urlencode($successMessage) . "&error=" . urlencode($errorMessage));
-    exit();
 }
 
 // Handle schedule addition
@@ -91,10 +65,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $showTime = $_POST['showTime'];
     $price = $_POST['price'];
     $status = $_POST['status'];
-    // The theaterId is already available from the GET parameter, no need to get from POST if it's tied to the page context
-
-    // Insert schedule - using lowercase quoted column names
-    $insertQuery = "INSERT INTO movie_schedules (\"movieid\", \"hallid\", \"showdate\", \"showtime\", price, \"schedulestatus\") VALUES ($1, $2, $3, $4, $5, $6)";
+    
+    $insertQuery = "INSERT INTO movie_schedules (\"movieID\", \"hallID\", \"showDate\", \"showTime\", price, \"scheduleStatus\") VALUES ($1, $2, $3, $4, $5, $6)";
     $insertResult = pg_query_params($conn, $insertQuery, array($movieId, $hallId, $showDate, $showTime, $price, $status));
     
     if ($insertResult) {
@@ -102,124 +74,77 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     } else {
         $errorMessage = "Error adding schedule: " . pg_last_error($conn);
     }
-    // Redirect to prevent re-submission on refresh and to reflect changes
-    header("Location: schedules.php?theater_id=" . $theaterId . "&success=" . urlencode($successMessage) . "&error=" . urlencode($errorMessage));
-    exit();
 }
 
-// Handle schedule update
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_schedule'])) {
-    $scheduleIdToUpdate = $_POST['edit_scheduleId'];
-    $movieId = $_POST['edit_movieId'];
-    $hallId = $_POST['edit_hallId'];
-    $showDate = $_POST['edit_showDate'];
-    $showTime = $_POST['edit_showTime'];
-    $price = $_POST['edit_price'];
-    $status = $_POST['edit_status'];
-
-    // Update schedule - using lowercase quoted column names
-    $updateQuery = "UPDATE movie_schedules SET \"movieid\" = $1, \"hallid\" = $2, \"showdate\" = $3, \"showtime\" = $4, price = $5, \"schedulestatus\" = $6 WHERE \"scheduleid\" = $7";
-    $updateResult = pg_query_params($conn, $updateQuery, array($movieId, $hallId, $showDate, $showTime, $price, $status, $scheduleIdToUpdate));
-
-    if ($updateResult) {
-        $successMessage = "Schedule updated successfully!";
-    } else {
-        $errorMessage = "Error updating schedule: " . pg_last_error($conn);
-    }
-    // Redirect to prevent re-submission on refresh and to reflect changes
-    header("Location: schedules.php?theater_id=" . $theaterId . "&success=" . urlencode($successMessage) . "&error=" . urlencode($errorMessage));
-    exit();
+// Get all movies for dropdown
+$moviesQuery = "SELECT \"movieID\", \"movieTitle\" FROM movietable ORDER BY \"movieTitle\"";
+$movies = pg_query($conn, $moviesQuery);
+if (!$movies) {
+    die("Error fetching movies: " . pg_last_error($conn));
 }
 
-// Display messages from redirect
-if (isset($_GET['success'])) {
-    $successMessage = $_GET['success'];
+// Get all theater halls for dropdown
+$hallsQuery = "
+    SELECT h.\"hallID\", h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
+    FROM theater_halls h
+    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    WHERE h.\"hallStatus\" = 'active'
+    ORDER BY t.\"theaterName\", h.\"hallName\"
+";
+$halls = pg_query($conn, $hallsQuery);
+if (!$halls) {
+    die("Error fetching halls: " . pg_last_error($conn));
 }
-if (isset($_GET['error'])) {
-    $errorMessage = $_GET['error'];
+
+// Get all schedules with pagination
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$recordsPerPage = 10;
+$offset = ($page - 1) * $recordsPerPage;
+
+// Search functionality
+$search = isset($_GET['search']) ? $_GET['search'] : '';
+$searchCondition = '';
+$params = [];
+$param_index = 1;
+
+if (!empty($search)) {
+    $searchParam = "%" . $search . "%";
+    $searchCondition = "WHERE m.\"movieTitle\" ILIKE $" . ($param_index++) . " OR t.\"theaterName\" ILIKE $" . ($param_index++) . "";
+    $params = [$searchParam, $searchParam];
 }
 
-// Only fetch data if a valid theaterId is present
-if ($theaterId > 0) {
-    // Get all movies for dropdown
-    // No filtering by theater for movies, as a movie can play in any theater
-    $moviesQuery = "SELECT \"movieid\", \"movietitle\" FROM movietable ORDER BY \"movietitle\"";
-    $movies = pg_query($conn, $moviesQuery);
-    if (!$movies) {
-        die("Error fetching movies: " . pg_last_error($conn));
-    }
+// Count total records for pagination
+$countQuery = "
+    SELECT COUNT(*) as total 
+    FROM movie_schedules ms
+    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
+    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
+    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    " . $searchCondition;
 
-    // Get all theater halls for dropdown, filtered by the current theaterId
-    // Corrected column names to lowercase quoted
-    $hallsQuery = "
-        SELECT h.\"hallid\", h.\"hallname\", h.\"halltype\", t.\"theatername\" 
-        FROM theater_halls h
-        JOIN theaters t ON h.\"theaterid\" = t.\"theaterid\"
-        WHERE h.\"hallstatus\" = 'active' AND h.\"theaterid\" = $1
-        ORDER BY t.\"theatername\", h.\"hallname\"
-    ";
-    $halls = pg_query_params($conn, $hallsQuery, array($theaterId));
-    if (!$halls) {
-        die("Error fetching halls: " . pg_last_error($conn));
-    }
+$stmtCountResult = pg_query_params($conn, $countQuery, $params);
+if (!$stmtCountResult) {
+    die("Error counting schedules: " . pg_last_error($conn));
+}
+$totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
+$totalPages = ceil($totalRecords / $recordsPerPage);
 
-    // Get all schedules with pagination, filtered by the current theaterId
-    $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-    $recordsPerPage = 10;
-    $offset = ($page - 1) * $recordsPerPage;
+// Get schedules for current page
+$query = "
+    SELECT ms.*, m.\"movieTitle\", h.\"hallName\", h.\"hallType\", t.\"theaterName\"
+    FROM movie_schedules ms
+    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
+    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
+    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    " . $searchCondition . "
+    ORDER BY ms.\"showDate\" DESC, ms.\"showTime\" DESC
+    LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
-    // Search functionality
-    $search = isset($_GET['search']) ? $_GET['search'] : '';
-    $searchCondition = '';
-    $params = [$theaterId]; // First parameter is always theaterId
-    $param_index = 2; // Start index for additional search params
+$query_params = array_merge($params, [$recordsPerPage, $offset]);
+$schedules = pg_query_params($conn, $query, $query_params);
 
-    if (!empty($search)) {
-        $searchParam = "%" . $search . "%";
-        $searchCondition = "AND (m.\"movietitle\" ILIKE $" . ($param_index++) . " OR t.\"theatername\" ILIKE $" . ($param_index++) . ")";
-        $params[] = $searchParam;
-        $params[] = $searchParam;
-    }
-
-    // Count total records for pagination - using lowercase quoted column names
-    $countQuery = "
-        SELECT COUNT(*) as total 
-        FROM movie_schedules ms
-        JOIN movietable m ON ms.\"movieid\" = m.\"movieid\"
-        JOIN theater_halls h ON ms.\"hallid\" = h.\"hallid\"
-        JOIN theaters t ON h.\"theaterid\" = t.\"theaterid\"
-        WHERE t.\"theaterid\" = $1
-        " . $searchCondition;
-
-    $stmtCountResult = pg_query_params($conn, $countQuery, $params);
-    if (!$stmtCountResult) {
-        die("Error counting schedules: " . pg_last_error($conn));
-    }
-    $totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
-    $totalPages = ceil($totalRecords / $recordsPerPage);
-
-    // Get schedules for current page - using lowercase quoted column names
-    $query = "
-        SELECT ms.*, m.\"movietitle\", h.\"hallname\", h.\"halltype\", t.\"theatername\"
-        FROM movie_schedules ms
-        JOIN movietable m ON ms.\"movieid\" = m.\"movieid\"
-        JOIN theater_halls h ON ms.\"hallid\" = h.\"hallid\"
-        JOIN theaters t ON h.\"theaterid\" = t.\"theaterid\"
-        WHERE t.\"theaterid\" = $1
-        " . $searchCondition . "
-        ORDER BY ms.\"showdate\" DESC, ms.\"showtime\" DESC
-        LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
-
-    $query_params = array_merge($params, [$recordsPerPage, $offset]);
-    $schedules = pg_query_params($conn, $query, $query_params);
-
-    if (!$schedules) {
-        die("Error fetching schedules: " . pg_last_error($conn));
-    }
-} else {
-    // If theaterId is 0 or invalid, ensure schedules and halls are null
-    $schedules = null;
-    $halls = null;
+if (!$schedules) {
+    die("Error fetching schedules: " . pg_last_error($conn));
 }
 
 pg_close($conn);
@@ -230,7 +155,7 @@ pg_close($conn);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Schedules for <?php echo htmlspecialchars($theaterName); ?> - Showtime Select Admin</title>
+    <title>Manage Schedules - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
     <link rel="icon" type="image/png" href="../img/sslogo.jpg">
@@ -444,20 +369,13 @@ pg_close($conn);
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Manage Schedules for <?php echo htmlspecialchars($theaterName); ?></h1>
-                    <div class="d-flex align-items-center">
-                        <a href="theaters.php" class="btn btn-secondary mr-2">
-                            <i class="fas fa-arrow-left"></i> Back to Theaters
-                        </a>
-                        <?php if ($theaterId > 0): // Only show "Add New Schedule" if a valid theater is selected ?>
-                            <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#addScheduleModal">
-                                <i class="fas fa-plus"></i> Add New Schedule
-                            </button>
-                        <?php endif; ?>
-                    </div>
+                    <h1>Manage Schedules</h1>
+                    <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#addScheduleModal">
+                        <i class="fas fa-plus"></i> Add New Schedule
+                    </button>
                 </div>
 
-                <?php if (isset($successMessage) && !empty($successMessage)): ?>
+                <?php if (isset($successMessage)): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <?php echo $successMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -466,7 +384,7 @@ pg_close($conn);
                     </div>
                 <?php endif; ?>
 
-                <?php if (isset($errorMessage) && !empty($errorMessage)): ?>
+                <?php if (isset($errorMessage)): ?>
                     <div class="alert alert-danger alert-dismissible fade show" role="alert">
                         <?php echo $errorMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -475,121 +393,108 @@ pg_close($conn);
                     </div>
                 <?php endif; ?>
 
-                <?php if ($theaterId == 0): // Display message if no theater is selected ?>
-                    <div class="alert alert-info text-center">
-                        Please select a theater from the <a href="theaters.php">Theaters list</a> to manage its schedules.
-                    </div>
-                <?php elseif ($schedules && pg_num_rows($schedules) > 0): ?>
-                    <div class="table-container">
-                        <div class="search-box">
-                            <form action="" method="GET" class="form-inline">
-                                <input type="hidden" name="theater_id" value="<?php echo htmlspecialchars($theaterId); ?>">
-                                <div class="input-group w-100">
-                                    <input type="text" name="search" class="form-control" placeholder="Search by movie or theater" value="<?php echo htmlspecialchars($search); ?>">
-                                    <div class="input-group-append">
-                                        <button class="btn btn-outline-secondary" type="submit">
-                                            <i class="fas fa-search"></i>
-                                        </button>
-                                        <?php if (!empty($search)): ?>
-                                            <a href="schedules.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" class="btn btn-outline-danger">
-                                                <i class="fas fa-times"></i>
-                                            </a>
-                                        <?php endif; ?>
-                                    </div>
+                <div class="table-container">
+                    <div class="search-box">
+                        <form action="" method="GET" class="form-inline">
+                            <div class="input-group w-100">
+                                <input type="text" name="search" class="form-control" placeholder="Search by movie or theater" value="<?php echo htmlspecialchars($search); ?>">
+                                <div class="input-group-append">
+                                    <button class="btn btn-outline-secondary" type="submit">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                    <?php if (!empty($search)): ?>
+                                        <a href="schedules.php" class="btn btn-outline-danger">
+                                            <i class="fas fa-times"></i>
+                                        </a>
+                                    <?php endif; ?>
                                 </div>
-                            </form>
-                        </div>
+                            </div>
+                        </form>
+                    </div>
 
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover">
-                                <thead class="thead-dark">
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Movie</th>
-                                        <th>Theater</th>
-                                        <th>Hall</th>
-                                        <th>Date</th>
-                                        <th>Time</th>
-                                        <th>Price</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="thead-dark">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Movie</th>
+                                    <th>Theater</th>
+                                    <th>Hall</th>
+                                    <th>Date</th>
+                                    <th>Time</th>
+                                    <th>Price</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (pg_num_rows($schedules) > 0): ?>
                                     <?php while ($schedule = pg_fetch_assoc($schedules)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($schedule['scheduleid']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['movietitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['theatername']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['movieTitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
                                             <td>
-                                                <?php echo htmlspecialchars($schedule['hallname']); ?> 
-                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['halltype']))); ?>)</span>
+                                                <?php echo htmlspecialchars($schedule['hallName']); ?> 
+                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</span>
                                             </td>
-                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showdate']))); ?></td>
-                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showtime']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showDate']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showTime']))); ?></td>
                                             <td>₹<?php echo number_format($schedule['price'], 2); ?></td>
                                             <td>
-                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['schedulestatus']); ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($schedule['schedulestatus'])); ?>
+                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['scheduleStatus']); ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($schedule['scheduleStatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <button type="button" class="btn btn-sm btn-warning edit-schedule"
-                                                        data-id="<?php echo htmlspecialchars($schedule['scheduleid']); ?>"
-                                                        data-movieid="<?php echo htmlspecialchars($schedule['movieid']); ?>"
-                                                        data-hallid="<?php echo htmlspecialchars($schedule['hallid']); ?>"
-                                                        data-showdate="<?php echo htmlspecialchars($schedule['showdate']); ?>"
-                                                        data-showtime="<?php echo htmlspecialchars($schedule['showtime']); ?>"
-                                                        data-price="<?php echo htmlspecialchars($schedule['price']); ?>"
-                                                        data-status="<?php echo htmlspecialchars($schedule['schedulestatus']); ?>"
-                                                        data-toggle="modal" data-target="#editScheduleModal">
+                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
-                                                </button>
-                                                <a href="schedules.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete=<?php echo htmlspecialchars($schedule['scheduleid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
+                                                </a>
+                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
                                         </tr>
                                     <?php endwhile; ?>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <?php if ($totalPages > 1): ?>
-                            <nav aria-label="Page navigation">
-                                <ul class="pagination">
-                                    <?php if ($page > 1): ?>
-                                        <li class="page-item">
-                                            <a class="page-link" href="?theater_id=<?php echo htmlspecialchars($theaterId); ?>&page=<?php echo $page - 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Previous">
-                                                <span aria-hidden="true">&laquo;</span>
-                                            </a>
-                                        </li>
-                                    <?php endif; ?>
-
-                                    <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                                        <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                                            <a class="page-link" href="?theater_id=<?php echo htmlspecialchars($theaterId); ?>&page=<?php echo $i; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>">
-                                                <?php echo $i; ?>
-                                            </a>
-                                        </li>
-                                    <?php endfor; ?>
-
-                                    <?php if ($page < $totalPages): ?>
-                                        <li class="page-item">
-                                            <a class="page-link" href="?theater_id=<?php echo htmlspecialchars($theaterId); ?>&page=<?php echo $page + 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Next">
-                                                <span aria-hidden="true">&raquo;</span>
-                                            </a>
-                                        </li>
-                                    <?php endif; ?>
-                                </ul>
-                            </nav>
-                        <?php endif; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="9" class="text-center">No schedules found</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
                     </div>
-                <?php else: ?>
-                    <div class="alert alert-info text-center">
-                        No schedules found for <?php echo htmlspecialchars($theaterName); ?>. Click "Add New Schedule" to get started.
-                    </div>
-                <?php endif; ?>
+
+                    <?php if ($totalPages > 1): ?>
+                        <nav aria-label="Page navigation">
+                            <ul class="pagination">
+                                <?php if ($page > 1): ?>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Previous">
+                                            <span aria-hidden="true">&laquo;</span>
+                                        </a>
+                                    </li>
+                                <?php endif; ?>
+
+                                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
+                                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>">
+                                            <?php echo $i; ?>
+                                        </a>
+                                    </li>
+                                <?php endfor; ?>
+
+                                <?php if ($page < $totalPages): ?>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Next">
+                                            <span aria-hidden="true">&raquo;</span>
+                                        </a>
+                                    </li>
+                                <?php endif; ?>
+                            </ul>
+                        </nav>
+                    <?php endif; ?>
+                </div>
             </main>
         </div>
     </div>
@@ -599,12 +504,12 @@ pg_close($conn);
         <div class="modal-dialog" role="document">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="addScheduleModalLabel">Add New Schedule for <?php echo htmlspecialchars($theaterName); ?></h5>
+                    <h5 class="modal-title" id="addScheduleModalLabel">Add New Schedule</h5>
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
-                <form action="schedules.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST">
+                <form action="" method="POST">
                     <div class="modal-body">
                         <div class="form-group">
                             <label for="movieId">Movie</label>
@@ -612,12 +517,12 @@ pg_close($conn);
                                 <option value="">Select Movie</option>
                                 <?php
                                 // Reset movie results pointer if already fetched
-                                if ($movies && pg_num_rows($movies) > 0) {
+                                if (pg_num_rows($movies) > 0) {
                                     pg_result_seek($movies, 0);
                                 }
                                 while ($movie = pg_fetch_assoc($movies)): ?>
-                                    <option value="<?php echo htmlspecialchars($movie['movieid']); ?>">
-                                        <?php echo htmlspecialchars($movie['movietitle']); ?>
+                                    <option value="<?php echo htmlspecialchars($movie['movieID']); ?>">
+                                        <?php echo htmlspecialchars($movie['movieTitle']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
@@ -628,12 +533,12 @@ pg_close($conn);
                                 <option value="">Select Theater Hall</option>
                                 <?php
                                 // Reset hall results pointer if already fetched
-                                if ($halls && pg_num_rows($halls) > 0) {
+                                if (pg_num_rows($halls) > 0) {
                                     pg_result_seek($halls, 0);
                                 }
                                 while ($hall = pg_fetch_assoc($halls)): ?>
-                                    <option value="<?php echo htmlspecialchars($hall['hallid']); ?>">
-                                        <?php echo htmlspecialchars($hall['hallname'] . ' (' . str_replace('-', ' ', $hall['halltype']) . ')'); ?>
+                                    <option value="<?php echo htmlspecialchars($hall['hallID']); ?>">
+                                        <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
@@ -668,103 +573,8 @@ pg_close($conn);
         </div>
     </div>
 
-    <!-- Edit Schedule Modal -->
-    <div class="modal fade" id="editScheduleModal" tabindex="-1" role="dialog" aria-labelledby="editScheduleModalLabel" aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="editScheduleModalLabel">Edit Schedule for <?php echo htmlspecialchars($theaterName); ?></h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
-                </div>
-                <form action="schedules.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST">
-                    <div class="modal-body">
-                        <input type="hidden" id="edit_scheduleId" name="edit_scheduleId">
-                        <div class="form-group">
-                            <label for="edit_movieId">Movie</label>
-                            <select class="form-control" id="edit_movieId" name="edit_movieId" required>
-                                <option value="">Select Movie</option>
-                                <?php
-                                // Reset movie results pointer for edit modal
-                                if ($movies && pg_num_rows($movies) > 0) {
-                                    pg_result_seek($movies, 0);
-                                }
-                                while ($movie = pg_fetch_assoc($movies)): ?>
-                                    <option value="<?php echo htmlspecialchars($movie['movieid']); ?>">
-                                        <?php echo htmlspecialchars($movie['movietitle']); ?>
-                                    </option>
-                                <?php endwhile; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_hallId">Theater Hall</label>
-                            <select class="form-control" id="edit_hallId" name="edit_hallId" required>
-                                <option value="">Select Theater Hall</option>
-                                <?php
-                                // Reset hall results pointer for edit modal
-                                if ($halls && pg_num_rows($halls) > 0) {
-                                    pg_result_seek($halls, 0);
-                                }
-                                while ($hall = pg_fetch_assoc($halls)): ?>
-                                    <option value="<?php echo htmlspecialchars($hall['hallid']); ?>">
-                                        <?php echo htmlspecialchars($hall['hallname'] . ' (' . str_replace('-', ' ', $hall['halltype']) . ')'); ?>
-                                    </option>
-                                <?php endwhile; ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_showDate">Show Date</label>
-                            <input type="date" class="form-control" id="edit_showDate" name="edit_showDate" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_showTime">Show Time</label>
-                            <input type="time" class="form-control" id="edit_showTime" name="edit_showTime" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_price">Ticket Price (₹)</label>
-                            <input type="number" step="0.01" class="form-control" id="edit_price" name="edit_price" required min="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_status">Status</label>
-                            <select class="form-control" id="edit_status" name="edit_status" required>
-                                <option value="active">Active</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="completed">Completed</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                        <button type="submit" name="update_schedule" class="btn btn-primary">Update Schedule</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-    <script>
-        // Fill edit modal with schedule data
-        $('.edit-schedule').click(function() {
-            var id = $(this).data('id');
-            var movieId = $(this).data('movieid');
-            var hallId = $(this).data('hallid');
-            var showDate = $(this).data('showdate');
-            var showTime = $(this).data('showtime');
-            var price = $(this).data('price');
-            var status = $(this).data('status');
-
-            $('#edit_scheduleId').val(id);
-            $('#edit_movieId').val(movieId);
-            $('#edit_hallId').val(hallId);
-            $('#edit_showDate').val(showDate);
-            $('#edit_showTime').val(showTime);
-            $('#edit_price').val(price);
-            $('#edit_status').val(status);
-        });
-    </script>
 </body>
 </html>

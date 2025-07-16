@@ -53,12 +53,12 @@ if ($theaterId > 0) {
         if ($schedulesCount > 0) {
             $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
         } else {
-            // Get hall panorama image path before deletion to remove the file - using lowercase quoted column name
-            $stmtImgQuery = "SELECT \"hallpanoramimg\" FROM theater_halls WHERE \"hallid\" = $1";
+            // Get hall panorama image path before deletion to remove the file - using corrected lowercase quoted column name
+            $stmtImgQuery = "SELECT \"hallpanoramaimg\" FROM theater_halls WHERE \"hallid\" = $1";
             $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
             $hallPanoramaImgPath = null;
             if ($row = pg_fetch_assoc($stmtImgResult)) {
-                $hallPanoramaImgPath = $row['hallpanoramimg'];
+                $hallPanoramaImgPath = $row['hallpanoramaimg'];
             }
 
             // Delete hall - using lowercase quoted column names
@@ -122,8 +122,8 @@ if ($theaterId > 0) {
         }
 
         if ($uploadOk !== 0) {
-            // Add hall - using lowercase quoted column names
-            $addHallQuery = "INSERT INTO theater_halls (\"theaterid\", \"hallname\", \"halltype\", \"totalseats\", \"hallstatus\", \"hallpanoramimg\") VALUES ($1, $2, $3, $4, $5, $6)";
+            // Add hall - using corrected lowercase quoted column name
+            $addHallQuery = "INSERT INTO theater_halls (\"theaterid\", \"hallname\", \"halltype\", \"totalseats\", \"hallstatus\", \"hallpanoramaimg\") VALUES ($1, $2, $3, $4, $5, $6)";
             $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
             
             if ($addHallResult) {
@@ -185,8 +185,8 @@ if ($theaterId > 0) {
         }
 
         if ($uploadOk !== 0) {
-            // Update hall - using lowercase quoted column names
-            $updateHallQuery = "UPDATE theater_halls SET \"hallname\" = $1, \"halltype\" = $2, \"totalseats\" = $3, \"hallstatus\" = $4, \"hallpanoramimg\" = $5 WHERE \"hallid\" = $6 AND \"theaterid\" = $7";
+            // Update hall - using corrected lowercase quoted column name
+            $updateHallQuery = "UPDATE theater_halls SET \"hallname\" = $1, \"halltype\" = $2, \"totalseats\" = $3, \"hallstatus\" = $4, \"hallpanoramaimg\" = $5 WHERE \"hallid\" = $6 AND \"theaterid\" = $7";
             $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
             
             if ($updateHallResult) {
@@ -511,8 +511,8 @@ pg_close($conn);
                                             </td>
                                             <td><?php echo htmlspecialchars($hall['totalseats']); ?></td>
                                             <td>
-                                                <?php if (!empty($hall['hallpanoramimg'])): ?>
-                                                    <img src="../<?php echo htmlspecialchars($hall['hallpanoramimg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
+                                                <?php if (!empty($hall['hallpanoramaimg'])): ?>
+                                                    <img src="../<?php echo htmlspecialchars($hall['hallpanoramaimg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
                                                 <?php else: ?>
                                                     N/A
                                                 <?php endif; ?>
@@ -529,7 +529,7 @@ pg_close($conn);
                                                         data-type="<?php echo htmlspecialchars($hall['halltype']); ?>"
                                                         data-seats="<?php echo htmlspecialchars($hall['totalseats']); ?>"
                                                         data-status="<?php echo htmlspecialchars($hall['hallstatus']); ?>"
-                                                        data-panorama="<?php echo htmlspecialchars($hall['hallpanoramimg'] ?? ''); ?>"
+                                                        data-panorama="<?php echo htmlspecialchars($hall['hallpanoramaimg'] ?? ''); ?>"
                                                         data-toggle="modal" data-target="#editHallModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>

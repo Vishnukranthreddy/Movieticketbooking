@@ -1,39 +1,15 @@
 <?php
 session_start();
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
-}
-
-$message = '';
-
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_feedback'])) {
-    $fName = $_POST['fName'];
-    $lName = $_POST['lName'];
-    $eMail = $_POST['eMail'];
-    $feedback = $_POST['feedback'];
-
-    // Use pg_query_params for prepared statements in PostgreSQL
-    $query = "INSERT INTO feedbacktable (senderfName, senderlName, sendereMail, senderfeedback) VALUES ($1, $2, $3, $4)";
-    $result = pg_query_params($conn, $query, array($fName, $lName, $eMail, $feedback));
-
-    if ($result) {
-        $message = '<div class="bg-green-600 text-white p-3 rounded-lg mb-4">Your message has been sent successfully! We will get back to you soon.</div>';
-    } else {
-        $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error sending message: ' . pg_last_error($conn) . '</div>';
-    }
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 // Query for "Now Playing Movies" section
@@ -62,11 +38,11 @@ $moviesQuery = "
         l.locationID
     ORDER BY m.movieRelDate DESC, m.movieTitle ASC
 ";
-$movies = pg_query($conn, $moviesQuery);
+$movies = $conn->query($moviesQuery);
 
 // Check if the movie query failed
 if ($movies === false) {
-    die("Movie Query failed: " . pg_last_error($conn) . "<br>SQL: " . htmlspecialchars($moviesQuery));
+    die("Movie Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($moviesQuery));
 }
 
 // Query for "Our Theaters" section
@@ -81,26 +57,19 @@ $theatersQuery = "
     WHERE theaterStatus = 'active'
     ORDER BY theaterName ASC
 ";
-$theaters = pg_query($conn, $theatersQuery);
+$theaters = $conn->query($theatersQuery);
 
 // Check if the theater query failed
 if ($theaters === false) {
-    die("Theater Query failed: " . pg_last_error($conn) . "<br>SQL: " . htmlspecialchars($theatersQuery));
+    die("Theater Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($theatersQuery));
 }
 
 // Get total movies count for stats
 $totalMoviesQuery = "SELECT COUNT(*) as total FROM movietable";
-$totalMoviesResult = pg_query($conn, $totalMoviesQuery);
-$totalMovies = 0; // Default to 0
-if ($totalMoviesResult) {
-    $totalMovies = pg_fetch_assoc($totalMoviesResult)['total'];
-} else {
-    // Log error or handle it appropriately, but don't die on a count query
-    error_log("Total Movies Query failed: " . pg_last_error($conn));
-}
+$totalMoviesResult = $conn->query($totalMoviesQuery);
+$totalMovies = $totalMoviesResult->fetch_assoc()['total'];
 
-// Close PostgreSQL connection
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -328,19 +297,19 @@ pg_close($conn);
     <main class="container mx-auto px-4 py-8">
         <!-- Now Playing Movies Section -->
         <h1 id="movies" class="text-4xl font-bold text-center mb-10 text-white">Now Playing Movies</h1>
-        <?php if ($movies && pg_num_rows($movies) > 0): ?>
+        <?php if ($movies->num_rows > 0): ?>
             <div class="grid-container grid-cols-2 lg:grid-cols-4">
-                <?php while ($movie = pg_fetch_assoc($movies)): ?>
+                <?php while ($movie = $movies->fetch_assoc()): ?>
                     <div class="card">
-                        <img src="../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="card-image">
+                        <img src="../<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="card-image">
                         <div class="p-6">
-                            <h2 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($movie['movietitle']); ?></h2>
-                            <p class="text-sm text-gray-400 mb-1"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['moviegenre']); ?></p>
-                            <p class="text-sm text-gray-400 mb-1"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieduration']); ?> min</p>
-                            <p class="text-sm text-gray-400 mb-4"><strong>Location:</strong> <?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></p>
+                            <h2 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($movie['movieTitle']); ?></h2>
+                            <p class="text-sm text-gray-400 mb-1"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['movieGenre']); ?></p>
+                            <p class="text-sm text-gray-400 mb-1"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieDuration']); ?> min</p>
+                            <p class="text-sm text-gray-400 mb-4"><strong>Location:</strong> <?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></p>
                         </div>
                         <div class="card-buttons">
-                            <a href="movie_details.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn-primary">View Details</a>
+                            <a href="movie_details.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn-primary">View Details</a>
                             <!-- Removed "View Theater" button from movie cards -->
                         </div>
                     </div>
@@ -352,18 +321,18 @@ pg_close($conn);
 
         <!-- Our Theaters Section -->
         <h1 class="text-4xl font-bold text-center mt-16 mb-10 text-white">Our Theaters</h1>
-        <?php if ($theaters && pg_num_rows($theaters) > 0): ?>
+        <?php if ($theaters->num_rows > 0): ?>
             <div class="grid-container grid-cols-2 lg:grid-cols-4">
-                <?php while ($theater = pg_fetch_assoc($theaters)): ?>
+                <?php while ($theater = $theaters->fetch_assoc()): ?>
                     <div class="theater-card">
-                        <img src="../<?php echo htmlspecialchars($theater['theaterpanoramimg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theatername']); ?>" class="theater-card-image">
+                        <img src="../<?php echo htmlspecialchars($theater['theaterPanoramaImg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theaterName']); ?>" class="theater-card-image">
                         <div class="p-6">
-                            <h2 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($theater['theatername']); ?></h2>
-                            <p class="text-sm text-gray-400 mb-4"><strong>City:</strong> <?php echo htmlspecialchars($theater['theatercity'] ?? 'N/A'); ?></p>
+                            <h2 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($theater['theaterName']); ?></h2>
+                            <p class="text-sm text-gray-400 mb-4"><strong>City:</strong> <?php echo htmlspecialchars($theater['theaterCity'] ?? 'N/A'); ?></p>
                         </div>
                         <div class="card-buttons">
-                            <?php if (!empty($theater['theaterpanoramimg'])): ?>
-                                <a href="view_theater.php?theater_id=<?php echo htmlspecialchars($theater['theaterid']); ?>" class="btn-primary">View Theater</a>
+                            <?php if (!empty($theater['theaterPanoramaImg'])): ?>
+                                <a href="view_theater.php?theater_id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn-primary">View Theater</a>
                             <?php else: ?>
                                 <span class="btn-secondary-custom opacity-50 cursor-not-allowed">No Panorama</span>
                             <?php endif; ?>

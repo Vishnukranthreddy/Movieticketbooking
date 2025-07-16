@@ -7,20 +7,15 @@ if (isset($_SESSION['user_id'])) {
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $error = "";
@@ -33,33 +28,41 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $new_password = $_POST['password'];
     $phone = $_POST['phone'];
 
-    // Check if username/email already exists using prepared statement
-    $check_query = "SELECT id FROM users WHERE username = $1 LIMIT 1";
-    $check_result = pg_query_params($conn, $check_query, array($new_username));
+    // Check if username/email already exists
+    $stmt = $conn->prepare("SELECT id FROM users WHERE username = ? LIMIT 1");
+    $stmt->bind_param("s", $new_username);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
-    if (!$check_result) {
-        $error = "Database query failed: " . pg_last_error($conn);
-    } elseif (pg_num_rows($check_result) > 0) {
+    if ($result->num_rows > 0) {
         $error = "Username/Email already exists. Please choose a different one.";
     } else {
-        // Insert new user using prepared statement
+        // Insert new user
         // Note: Storing plain text password for consistency with provided movie_db.sql.
         // In a real application, ALWAYS hash passwords using password_hash().
-        $insert_query = "INSERT INTO users (username, name, password, phone) VALUES ($1, $2, $3, $4)";
-        $insert_result = pg_query_params($conn, $insert_query, array($new_username, $name, $new_password, $phone));
+        $insert_stmt = $conn->prepare("INSERT INTO users (username, name, password, phone) VALUES (?, ?, ?, ?)");
+        $insert_stmt->bind_param("ssss", $new_username, $name, $new_password, $phone); // new_password is plain text here
 
-        if ($insert_result) {
+        if ($insert_stmt->execute()) {
             $success = "Registration successful! You can now log in.";
+            // Optionally, log the user in directly after registration
+            // $_SESSION['user_id'] = $conn->insert_id;
+            // $_SESSION['user_username'] = $new_username;
+            // $_SESSION['user_name'] = $name;
+            // $_SESSION['user_phone'] = $phone;
+            // header("Location: profile.php");
+            // exit();
             header("Location: login.php?registered=true"); // Redirect to login page
             exit();
         } else {
-            $error = "Error during registration: " . pg_last_error($conn);
+            $error = "Error during registration: " . $conn->error;
         }
+        $insert_stmt->close();
     }
+    $stmt->close();
 }
 
-// Close PostgreSQL connection
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>

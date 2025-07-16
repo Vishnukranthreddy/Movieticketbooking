@@ -7,70 +7,82 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 // Pagination parameters
 $limit = 10;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$offset = ($page - 1) * $limit;
+$start = ($page - 1) * $limit;
 
 // Search functionality
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
 $params = [];
-$param_index = 1;
+$types = '';
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    // Using ILIKE for case-insensitive search in PostgreSQL
-    $searchCondition = " WHERE username ILIKE $" . ($param_index++) . " OR name ILIKE $" . ($param_index++) . " OR phone ILIKE $" . ($param_index++) . "";
+    $searchCondition = " WHERE username LIKE ? OR name LIKE ? OR phone LIKE ?"; // Added phone to search
     $params = [$searchParam, $searchParam, $searchParam];
+    $types = "sss";
 }
 
 // --- Function to fetch users with pagination and search ---
-function fetchUsers($conn, $searchCondition, $params, $offset, $limit) {
+// This function will be called initially and again after adding a user
+function fetchUsers($conn, $searchCondition, $params, $types, $start, $limit) {
     $usersQuery = "
         SELECT id, username, name, phone FROM users
-        " . $searchCondition . "
+        $searchCondition
         ORDER BY id DESC
-        LIMIT $" . (count($params) + 1) . " OFFSET $" . (count($params) + 2) . "
+        LIMIT ?, ?
     ";
-    
-    $query_params = array_merge($params, [$limit, $offset]);
-    $result = pg_query_params($conn, $usersQuery, $query_params);
-    
-    if (!$result) {
-        die("Error fetching users: " . pg_last_error($conn));
+    $stmtUsers = $conn->prepare($usersQuery);
+
+    $query_params = $params;
+    $query_types = $types;
+
+    $query_params[] = $start;
+    $query_params[] = $limit;
+    $query_types .= "ii";
+
+    if (!empty($searchCondition)) {
+        // Use call_user_func_array for binding a variable number of parameters
+        $stmtUsers->bind_param($query_types, ...$query_params);
+    } else {
+        $stmtUsers->bind_param("ii", $start, $limit);
     }
+    
+    $stmtUsers->execute();
+    $result = $stmtUsers->get_result();
+    $stmtUsers->close(); // Close the statement after getting result
     return $result;
 }
 
 // Get total users count
-$totalQuery = "SELECT COUNT(*) as total FROM users " . $searchCondition;
-$totalResult = pg_query_params($conn, $totalQuery, $params);
-if (!$totalResult) {
-    die("Error counting users: " . pg_last_error($conn));
+$totalQuery = "SELECT COUNT(*) as total FROM users $searchCondition";
+$stmtCount = $conn->prepare($totalQuery);
+if (!empty($searchCondition)) {
+    $stmtCount->bind_param($types, ...$params);
 }
-$totalRow = pg_fetch_assoc($totalResult);
+$stmtCount->execute();
+$totalResult = $stmtCount->get_result();
+$totalRow = $totalResult->fetch_assoc();
 $total = $totalRow['total'];
 $pages = ceil($total / $limit);
+$stmtCount->close();
 
 // --- Initial fetch of users ---
-$users = fetchUsers($conn, $searchCondition, $params, $offset, $limit);
+$users = fetchUsers($conn, $searchCondition, $params, $types, $start, $limit);
+
 
 // Process form submission for adding a new user
 $message = '';
@@ -82,27 +94,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $newPhone = $_POST['phone'] ?? ''; // New phone column
 
     // Check if username already exists
-    $checkQuery = "SELECT id FROM users WHERE username = $1 LIMIT 1";
-    $checkResult = pg_query_params($conn, $checkQuery, array($newUsername));
+    $checkQuery = $conn->prepare("SELECT id FROM users WHERE username = ? LIMIT 1");
+    $checkQuery->bind_param("s", $newUsername);
+    $checkQuery->execute();
+    $checkResult = $checkQuery->get_result();
+    $checkQuery->close();
     
-    if ($checkResult && pg_num_rows($checkResult) > 0) {
+    if ($checkResult->num_rows > 0) {
         $message = 'Username (Email) already exists!';
         $messageType = 'danger';
     } else {
-        // Insert new user - Hashing password for security
-        $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
-        $insertQuery = "INSERT INTO users (username, name, password, phone) VALUES ($1, $2, $3, $4)";
-        $insertResult = pg_query_params($conn, $insertQuery, array($newUsername, $newName, $hashedPassword, $newPhone));
+        // Insert new user - Assuming plain text password for consistency with sample data
+        // In a real application, ALWAYS hash passwords using password_hash()
+        $insertQuery = $conn->prepare("INSERT INTO users (username, name, password, phone) VALUES (?, ?, ?, ?)");
+        $insertQuery->bind_param("ssss", $newUsername, $newName, $newPassword, $newPhone);
 
-        if ($insertResult) {
+        if ($insertQuery->execute()) {
             $message = 'User added successfully!';
             $messageType = 'success';
-            // Re-fetch user list to display updated info immediately
-            $users = fetchUsers($conn, $searchCondition, $params, $offset, $limit);
+            // Refresh user list by calling fetchUsers function again
+            // We need to re-evaluate pagination context if records change,
+            // but for simplicity, we'll just re-fetch the current page.
+            $users = fetchUsers($conn, $searchCondition, $params, $types, $start, $limit);
+
         } else {
-            $message = 'Error adding user: ' . pg_last_error($conn);
+            $message = 'Error adding user: ' . $conn->error;
             $messageType = 'danger';
         }
+        $insertQuery->close();
     }
 }
 
@@ -112,7 +131,7 @@ if (isset($_GET['message']) && isset($_GET['type'])) {
     $messageType = htmlspecialchars($_GET['type']);
 }
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -402,8 +421,8 @@ pg_close($conn);
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if (pg_num_rows($users) > 0): ?>
-                                    <?php while ($user = pg_fetch_assoc($users)): ?>
+                                <?php if ($users->num_rows > 0): ?>
+                                    <?php while ($user = $users->fetch_assoc()): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($user['id']); ?></td>
                                             <td><?php echo htmlspecialchars($user['name']); ?></td>

@@ -7,20 +7,15 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $hallId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -32,27 +27,30 @@ $successMessage = '';
 
 if ($hallId > 0 && $theaterId > 0) {
     // Fetch theater name for display
-    $stmtTheaterQuery = "SELECT \"theaterName\" FROM theaters WHERE \"theaterID\" = $1";
-    $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
-    if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
-        $rowTheater = pg_fetch_assoc($stmtTheaterResult);
+    $stmtTheater = $conn->prepare("SELECT theaterName FROM theaters WHERE theaterID = ?");
+    $stmtTheater->bind_param("i", $theaterId);
+    $stmtTheater->execute();
+    $resultTheater = $stmtTheater->get_result();
+    if ($rowTheater = $resultTheater->fetch_assoc()) {
         $theaterName = $rowTheater['theaterName'];
     } else {
         $errorMessage = "Associated Theater not found.";
         $theaterId = 0; // Invalidate theaterId if not found
     }
+    $stmtTheater->close();
 
     if ($theaterId > 0) { // Only proceed if theater is valid
         // Fetch current hall details
-        $stmtHallQuery = "SELECT * FROM theater_halls WHERE \"hallID\" = $1 AND \"theaterID\" = $2";
-        $stmtHallResult = pg_query_params($conn, $stmtHallQuery, array($hallId, $theaterId));
-        if ($stmtHallResult && pg_num_rows($stmtHallResult) > 0) {
-            $hall = pg_fetch_assoc($stmtHallResult);
-            // Convert keys to lowercase for consistency with PostgreSQL's default behavior
-            $hall = array_change_key_case($hall, CASE_LOWER);
+        $stmt = $conn->prepare("SELECT * FROM theater_halls WHERE hallID = ? AND theaterID = ?");
+        $stmt->bind_param("ii", $hallId, $theaterId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($result->num_rows > 0) {
+            $hall = $result->fetch_assoc();
         } else {
             $errorMessage = "Hall not found for this theater.";
         }
+        $stmt->close();
     }
 } else {
     $errorMessage = "Invalid hall or theater ID provided.";
@@ -68,23 +66,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_hall'])) {
         $totalSeats = $_POST['totalSeats'];
         $hallStatus = $_POST['hallStatus'];
 
-        $updateQuery = "UPDATE theater_halls SET \"hallName\" = $1, \"hallType\" = $2, \"totalSeats\" = $3, \"hallStatus\" = $4 WHERE \"hallID\" = $5 AND \"theaterID\" = $6";
-        $updateResult = pg_query_params($conn, $updateQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $hallId, $theaterId));
+        $updateStmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ? WHERE hallID = ? AND theaterID = ?");
+        $updateStmt->bind_param("ssisii", $hallName, $hallType, $totalSeats, $hallStatus, $hallId, $theaterId);
 
-        if ($updateResult) {
+        if ($updateStmt->execute()) {
             $successMessage = "Hall updated successfully!";
             // Refresh hall data after update
-            $stmtHallQuery = "SELECT * FROM theater_halls WHERE \"hallID\" = $1 AND \"theaterID\" = $2";
-            $stmtHallResult = pg_query_params($conn, $stmtHallQuery, array($hallId, $theaterId));
-            $hall = pg_fetch_assoc($stmtHallResult); // Update $hall variable with new data
-            $hall = array_change_key_case($hall, CASE_LOWER);
+            $stmt = $conn->prepare("SELECT * FROM theater_halls WHERE hallID = ? AND theaterID = ?");
+            $stmt->bind_param("ii", $hallId, $theaterId);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $hall = $result->fetch_assoc(); // Update $hall variable with new data
+            $stmt->close();
         } else {
-            $errorMessage = "Error updating hall: " . pg_last_error($conn);
+            $errorMessage = "Error updating hall: " . $updateStmt->error;
         }
+        $updateStmt->close();
     }
 }
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -305,32 +306,32 @@ pg_close($conn);
                 <?php if ($hall): ?>
                     <div class="form-container">
                         <form action="" method="POST">
-                            <input type="hidden" name="hallId" value="<?php echo htmlspecialchars($hall['hallid']); ?>">
+                            <input type="hidden" name="hallId" value="<?php echo htmlspecialchars($hall['hallID']); ?>">
                             
                             <div class="form-group">
                                 <label for="hallName">Hall Name</label>
-                                <input type="text" class="form-control" id="hallName" name="hallName" value="<?php echo htmlspecialchars($hall['hallname']); ?>" required>
+                                <input type="text" class="form-control" id="hallName" name="hallName" value="<?php echo htmlspecialchars($hall['hallName']); ?>" required>
                             </div>
                             
                             <div class="form-group">
                                 <label for="hallType">Hall Type</label>
                                 <select class="form-control" id="hallType" name="hallType" required>
-                                    <option value="main-hall" <?php echo ($hall['halltype'] == 'main-hall') ? 'selected' : ''; ?>>Main Hall</option>
-                                    <option value="vip-hall" <?php echo ($hall['halltype'] == 'vip-hall') ? 'selected' : ''; ?>>VIP Hall</option>
-                                    <option value="private-hall" <?php echo ($hall['halltype'] == 'private-hall') ? 'selected' : ''; ?>>Private Hall</option>
+                                    <option value="main-hall" <?php echo ($hall['hallType'] == 'main-hall') ? 'selected' : ''; ?>>Main Hall</option>
+                                    <option value="vip-hall" <?php echo ($hall['hallType'] == 'vip-hall') ? 'selected' : ''; ?>>VIP Hall</option>
+                                    <option value="private-hall" <?php echo ($hall['hallType'] == 'private-hall') ? 'selected' : ''; ?>>Private Hall</option>
                                 </select>
                             </div>
                             
                             <div class="form-group">
                                 <label for="totalSeats">Total Seats</label>
-                                <input type="number" class="form-control" id="totalSeats" name="totalSeats" value="<?php echo htmlspecialchars($hall['totalseats']); ?>" required min="1">
+                                <input type="number" class="form-control" id="totalSeats" name="totalSeats" value="<?php echo htmlspecialchars($hall['totalSeats']); ?>" required min="1">
                             </div>
                             
                             <div class="form-group">
                                 <label for="hallStatus">Status</label>
                                 <select class="form-control" id="hallStatus" name="hallStatus" required>
-                                    <option value="active" <?php echo ($hall['hallstatus'] == 'active') ? 'selected' : ''; ?>>Active</option>
-                                    <option value="inactive" <?php echo ($hall['hallstatus'] == 'inactive') ? 'selected' : ''; ?>>Inactive</option>
+                                    <option value="active" <?php echo ($hall['hallStatus'] == 'active') ? 'selected' : ''; ?>>Active</option>
+                                    <option value="inactive" <?php echo ($hall['hallStatus'] == 'inactive') ? 'selected' : ''; ?>>Inactive</option>
                                 </select>
                             </div>
                             
@@ -341,8 +342,6 @@ pg_close($conn);
                             </div>
                         </form>
                     </div>
-                <?php else: ?>
-                    <p class="text-center text-danger">Hall details could not be loaded.</p>
                 <?php endif; ?>
             </main>
         </div>

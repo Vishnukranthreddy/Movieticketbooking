@@ -15,20 +15,15 @@ if (!isset($_GET['id'])) {
 
 $bookingID = $_GET['id'];
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $booking = null;
@@ -36,36 +31,39 @@ $payment = null;
 
 // Get comprehensive booking details by joining all relevant tables
 $bookingQuery = "
-    SELECT b.*, m.\"movieTitle\", m.\"movieImg\", m.\"movieGenre\", m.\"movieDuration\",
-           ms.\"showDate\", ms.\"showTime\", ms.price as ticketPricePerUnit,
-           h.\"hallName\", h.\"hallType\", t.\"theaterName\", t.\"theaterAddress\", t.\"theaterCity\"
+    SELECT b.*, m.movieTitle, m.movieImg, m.movieGenre, m.movieDuration,
+           ms.showDate, ms.showTime, ms.price as ticketPricePerUnit,
+           h.hallName, h.hallType, t.theaterName, t.theaterAddress, t.theaterCity
     FROM bookingtable b
-    LEFT JOIN movietable m ON b.\"movieID\" = m.\"movieID\"
-    LEFT JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
-    LEFT JOIN theater_halls h ON b.\"hallID\" = h.\"hallID\"
-    LEFT JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
-    WHERE b.\"bookingID\" = $1
+    LEFT JOIN movietable m ON b.movieID = m.movieID
+    LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
+    LEFT JOIN theater_halls h ON b.hallID = h.hallID
+    LEFT JOIN theaters t ON h.theaterID = t.theaterID
+    WHERE b.bookingID = ?
 ";
-$bookingResult = pg_query_params($conn, $bookingQuery, array($bookingID));
+$stmtBooking = $conn->prepare($bookingQuery);
+$stmtBooking->bind_param("i", $bookingID);
+$stmtBooking->execute();
+$bookingResult = $stmtBooking->get_result();
 
-if (!$bookingResult || pg_num_rows($bookingResult) === 0) {
+if ($bookingResult->num_rows === 0) {
     header("Location: bookings.php");
     exit();
 }
 
-$booking = pg_fetch_assoc($bookingResult);
-// Convert keys to lowercase for consistency with PostgreSQL's default behavior
-$booking = array_change_key_case($booking, CASE_LOWER);
+$booking = $bookingResult->fetch_assoc();
+$stmtBooking->close();
 
 // Get payment details if available
-$paymentQuery = "SELECT * FROM payment WHERE \"ORDERID\" = $1";
-$paymentResult = pg_query_params($conn, $paymentQuery, array($booking['orderid']));
-$payment = pg_num_rows($paymentResult) > 0 ? pg_fetch_assoc($paymentResult) : null;
-if ($payment) {
-    $payment = array_change_key_case($payment, CASE_LOWER);
-}
+$paymentQuery = "SELECT * FROM payment WHERE ORDERID = ?";
+$stmtPayment = $conn->prepare($paymentQuery);
+$stmtPayment->bind_param("s", $booking['ORDERID']);
+$stmtPayment->execute();
+$paymentResult = $stmtPayment->get_result();
+$payment = $paymentResult->num_rows > 0 ? $paymentResult->fetch_assoc() : null;
+$stmtPayment->close();
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -395,15 +393,15 @@ pg_close($conn);
                 <div class="booking-container">
                     <?php if ($booking): ?>
                     <div class="movie-details-section">
-                        <?php if (!empty($booking['movieimg'])): ?>
-                            <img src="../../<?php echo htmlspecialchars($booking['movieimg']); ?>" alt="<?php echo htmlspecialchars($booking['movietitle'] ?? 'Movie Poster'); ?>" class="movie-poster">
+                        <?php if (!empty($booking['movieImg'])): ?>
+                            <img src="../../<?php echo htmlspecialchars($booking['movieImg']); ?>" alt="<?php echo htmlspecialchars($booking['movieTitle'] ?? 'Movie Poster'); ?>" class="movie-poster">
                         <?php else: ?>
                             <img src="https://placehold.co/120x180/cccccc/333333?text=No+Image" alt="No Movie Poster" class="movie-poster">
                         <?php endif; ?>
                         <div>
-                            <h3><?php echo htmlspecialchars($booking['movietitle'] ?? 'N/A Movie'); ?></h3>
-                            <p><strong>Order ID:</strong> <?php echo htmlspecialchars($booking['orderid']); ?></p>
-                            <p><strong>Booking ID:</strong> <?php echo htmlspecialchars($booking['bookingid']); ?></p>
+                            <h3><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A Movie'); ?></h3>
+                            <p><strong>Order ID:</strong> <?php echo htmlspecialchars($booking['ORDERID']); ?></p>
+                            <p><strong>Booking ID:</strong> <?php echo htmlspecialchars($booking['bookingID']); ?></p>
                         </div>
                     </div>
                     
@@ -411,39 +409,39 @@ pg_close($conn);
                     <div class="booking-info-grid">
                         <div class="booking-detail-item">
                             <strong>Customer Name</strong>
-                            <?php echo htmlspecialchars($booking['bookingfname'] . ' ' . $booking['bookinglname']); ?>
+                            <?php echo htmlspecialchars($booking['bookingFName'] . ' ' . $booking['bookingLName']); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Email</strong>
-                            <?php echo htmlspecialchars($booking['bookingemail']); ?>
+                            <?php echo htmlspecialchars($booking['bookingEmail']); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Phone</strong>
-                            <?php echo htmlspecialchars($booking['bookingpnumber']); ?>
+                            <?php echo htmlspecialchars($booking['bookingPNumber']); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Movie Genre</strong>
-                            <?php echo htmlspecialchars($booking['moviegenre'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($booking['movieGenre'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Movie Duration</strong>
-                            <?php echo htmlspecialchars($booking['movieduration'] ?? 'N/A'); ?> min
+                            <?php echo htmlspecialchars($booking['movieDuration'] ?? 'N/A'); ?> min
                         </div>
                         <div class="booking-detail-item">
                             <strong>Show Date</strong>
-                            <?php echo htmlspecialchars($booking['showdate'] ? date('F j, Y', strtotime($booking['showdate'])) : 'N/A'); ?>
+                            <?php echo htmlspecialchars($booking['showDate'] ? date('F j, Y', strtotime($booking['showDate'])) : 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Show Time</strong>
-                            <?php echo htmlspecialchars($booking['showtime'] ? date('h:i A', strtotime($booking['showtime'])) : 'N/A'); ?>
+                            <?php echo htmlspecialchars($booking['showTime'] ? date('h:i A', strtotime($booking['showTime'])) : 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Theater</strong>
-                            <?php echo htmlspecialchars($booking['theatername'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($booking['theaterName'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Hall</strong>
-                            <?php echo htmlspecialchars($booking['hallname'] ?? 'N/A'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($booking['halltype'] ?? ''))); ?>)
+                            <?php echo htmlspecialchars($booking['hallName'] ?? 'N/A'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($booking['hallType'] ?? ''))); ?>)
                         </div>
                         <div class="booking-detail-item">
                             <strong>Booked Seats</strong>
@@ -455,7 +453,7 @@ pg_close($conn);
                         </div>
                         <div class="booking-detail-item">
                             <strong>Ticket Price per Unit</strong>
-                            ₹<?php echo number_format($booking['ticketpriceperunit'] ?? 0, 2); ?>
+                            ₹<?php echo number_format($booking['ticketPricePerUnit'] ?? 0, 2); ?>
                         </div>
                     </div>
                     
@@ -464,41 +462,41 @@ pg_close($conn);
                     <div class="booking-info-grid">
                         <div class="booking-detail-item">
                             <strong>Transaction ID</strong>
-                            <?php echo htmlspecialchars($payment['txnid'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['TXNID'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Payment Mode</strong>
-                            <?php echo htmlspecialchars($payment['paymentmode'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['PAYMENTMODE'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Amount Paid (PG)</strong>
-                            <?php echo htmlspecialchars($payment['txnamount'] ?? 'N/A') . ' ' . htmlspecialchars($payment['currency'] ?? ''); ?>
+                            <?php echo htmlspecialchars($payment['TXNAMOUNT'] ?? 'N/A') . ' ' . htmlspecialchars($payment['CURRENCY'] ?? ''); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Transaction Date (PG)</strong>
-                            <?php echo htmlspecialchars($payment['txndate'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['TXNDATE'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Status (PG)</strong>
-                            <span class="badge badge-<?php echo ($payment['status'] ?? '') === 'TXN_SUCCESS' ? 'success' : 'danger'; ?>">
-                                <?php echo htmlspecialchars($payment['status'] ?? 'N/A'); ?>
+                            <span class="badge badge-<?php echo ($payment['STATUS'] ?? '') === 'TXN_SUCCESS' ? 'success' : 'danger'; ?>">
+                                <?php echo htmlspecialchars($payment['STATUS'] ?? 'N/A'); ?>
                             </span>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Response Message</strong>
-                            <?php echo htmlspecialchars($payment['respmsg'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['RESPMSG'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Gateway Name</strong>
-                            <?php echo htmlspecialchars($payment['gatewayname'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['GATEWAYNAME'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Bank Transaction ID</strong>
-                            <?php echo htmlspecialchars($payment['banktxnid'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['BANKTXNID'] ?? 'N/A'); ?>
                         </div>
                         <div class="booking-detail-item">
                             <strong>Bank Name</strong>
-                            <?php echo htmlspecialchars($payment['bankname'] ?? 'N/A'); ?>
+                            <?php echo htmlspecialchars($payment['BANKNAME'] ?? 'N/A'); ?>
                         </div>
                     </div>
                     <?php endif; ?>
@@ -506,21 +504,21 @@ pg_close($conn);
                     <div class="ticket mt-4">
                         <div class="ticket-header">
                             <div class="ticket-logo">Showtime Select</div>
-                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=<?php echo urlencode($booking['orderid']); ?>" alt="QR Code" class="ticket-qr">
+                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=<?php echo urlencode($booking['ORDERID']); ?>" alt="QR Code" class="ticket-qr">
                         </div>
                         <div class="row">
                             <div class="col-md-8">
-                                <h5><?php echo htmlspecialchars($booking['movietitle'] ?? 'N/A Movie'); ?></h5>
+                                <h5><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A Movie'); ?></h5>
                                 <p>
-                                    <strong>Date & Time:</strong> <?php echo htmlspecialchars($booking['showdate'] ? date('F j, Y', strtotime($booking['showdate'])) : 'N/A'); ?> at <?php echo htmlspecialchars($booking['showtime'] ? date('h:i A', strtotime($booking['showtime'])) : 'N/A'); ?><br>
-                                    <strong>Theatre:</strong> <?php echo htmlspecialchars($booking['theatername'] ?? 'N/A Theater'); ?> - <?php echo htmlspecialchars($booking['hallname'] ?? 'N/A Hall'); ?><br>
+                                    <strong>Date & Time:</strong> <?php echo htmlspecialchars($booking['showDate'] ? date('F j, Y', strtotime($booking['showDate'])) : 'N/A'); ?> at <?php echo htmlspecialchars($booking['showTime'] ? date('h:i A', strtotime($booking['showTime'])) : 'N/A'); ?><br>
+                                    <strong>Theatre:</strong> <?php echo htmlspecialchars($booking['theaterName'] ?? 'N/A Theater'); ?> - <?php echo htmlspecialchars($booking['hallName'] ?? 'N/A Hall'); ?><br>
                                     <strong>Seats:</strong> <?php echo htmlspecialchars($booking['seats'] ?? 'N/A'); ?>
                                 </p>
                             </div>
                             <div class="col-md-4 text-right">
                                 <p>
                                     <strong>Order ID:</strong><br>
-                                    <?php echo htmlspecialchars($booking['orderid']); ?>
+                                    <?php echo htmlspecialchars($booking['ORDERID']); ?>
                                 </p>
                             </div>
                         </div>
@@ -531,10 +529,10 @@ pg_close($conn);
                             <i class="fas fa-arrow-left"></i> Back to Bookings
                         </a>
                         <!-- Edit/Delete links might need separate files if they are complex -->
-                        <!-- <a href="edit_booking.php?id=<?php echo htmlspecialchars($booking['bookingid']); ?>" class="btn btn-primary">
+                        <!-- <a href="edit_booking.php?id=<?php echo htmlspecialchars($booking['bookingID']); ?>" class="btn btn-primary">
                             <i class="fas fa-edit"></i> Edit Booking
                         </a>
-                        <a href="delete_booking.php?id=<?php echo htmlspecialchars($booking['bookingid']); ?>" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this booking?')">
+                        <a href="delete_booking.php?id=<?php echo htmlspecialchars($booking['bookingID']); ?>" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this booking?')">
                             <i class="fas fa-trash"></i> Delete Booking
                         </a> -->
                         <button class="btn btn-success" onclick="window.print()">

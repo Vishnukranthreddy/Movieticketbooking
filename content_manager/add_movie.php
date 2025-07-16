@@ -7,28 +7,19 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 // Get all locations for dropdown
-$locationsQuery = "SELECT \"locationID\", \"locationName\" FROM locations WHERE \"locationStatus\" = 'active' ORDER BY \"locationName\"";
-$locations = pg_query($conn, $locationsQuery);
-if (!$locations) {
-    die("Error fetching locations: " . pg_last_error($conn));
-}
+$locations = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
 
 // Process form submission
 $errorMessage = '';
@@ -49,14 +40,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Handle file upload
     $targetDir = "../../img/"; // Path relative to content_manager folder (two levels up)
     $fileName = basename($_FILES["movieImage"]["name"]);
-    $uniqueFileName = uniqid() . "_" . $fileName; // Generate a unique file name
-    $targetFilePath = $targetDir . $uniqueFileName;
+    $targetFilePath = $targetDir . $fileName;
     $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
     $uploadOk = 1;
     
     // Check if image file is a actual image or fake image
     if(isset($_FILES["movieImage"]["tmp_name"]) && $_FILES["movieImage"]["tmp_name"] != "") {
-        $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @ to suppress warnings
+        $check = getimagesize($_FILES["movieImage"]["tmp_name"]);
         if($check !== false) {
             $uploadOk = 1;
         } else {
@@ -89,30 +79,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // if everything is ok, try to upload file
         if (move_uploaded_file($_FILES["movieImage"]["tmp_name"], $targetFilePath)) {
             // File uploaded successfully, now insert movie data
-            $movieImg = "img/" . $uniqueFileName; // Path to store in database (relative to project root)
+            $movieImg = "img/" . $fileName; // Path to store in database (relative to project root)
 
-            $insertQuery = "INSERT INTO movietable (\"movieImg\", \"movieTitle\", \"movieGenre\", \"movieDuration\", \"movieRelDate\", \"movieDirector\", \"movieActors\", \"locationID\", mainhall, viphall, privatehall) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
-            $insertResult = pg_query_params($conn, $insertQuery, array($movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall));
+            $stmt = $conn->prepare("INSERT INTO movietable (movieImg, movieTitle, movieGenre, movieDuration, movieRelDate, movieDirector, movieActors, locationID, mainhall, viphall, privatehall) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            // 's' for string, 'i' for integer, 's' for string for movieRelDate (date can be treated as string for bind_param)
+            $stmt->bind_param("sssssssiiss", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall);
             
-            if ($insertResult) {
+            if ($stmt->execute()) {
                 $successMessage = "Movie added successfully!";
                 // Redirect to movies page after successful addition
                 header("Location: movies.php?success=1");
                 exit();
             } else {
-                $errorMessage = "Error: " . pg_last_error($conn);
+                $errorMessage = "Error: " . $stmt->error;
                 // If DB insert fails, consider deleting the uploaded file to clean up
-                if (file_exists($targetFilePath)) {
-                    unlink($targetFilePath); 
-                }
+                unlink($targetFilePath); 
             }
+            $stmt->close();
         } else {
             $errorMessage = "Sorry, there was an error uploading your file.";
         }
     }
 }
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -363,12 +353,9 @@ pg_close($conn);
                                     <label for="locationID">Location</label>
                                     <select class="form-control" id="locationID" name="locationID">
                                         <option value="">Select Location (Optional)</option>
-                                        <?php 
-                                        // Reset location results pointer if already fetched
-                                        if (pg_num_rows($locations) > 0) {
-                                            pg_result_seek($locations, 0);
-                                        }
-                                        while ($location = pg_fetch_assoc($locations)): ?>
+                                        <?php // Reset location results pointer if already fetched
+                                        if ($locations->num_rows > 0) $locations->data_seek(0);
+                                        while ($location = $locations->fetch_assoc()): ?>
                                             <option value="<?php echo htmlspecialchars($location['locationID']); ?>">
                                                 <?php echo htmlspecialchars($location['locationName']); ?>
                                             </option>
@@ -384,7 +371,7 @@ pg_close($conn);
                             </div>
                         </div>
                         
-                        <!-- Hall Price inputs -->
+                        <!-- Hall Price inputs (if still needed, otherwise remove) -->
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="form-group">

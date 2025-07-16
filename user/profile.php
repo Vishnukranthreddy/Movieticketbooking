@@ -1,26 +1,21 @@
 <?php
 session_start();
 
-// Check if user is logged in, if not redirect to login page
+// Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $userBookings = [];
@@ -32,23 +27,20 @@ $userEmail = $_SESSION['user_username'] ?? ''; // Assuming username is used as e
 // Get user information for profile display
 $user = null;
 if (isset($_SESSION['user_id'])) {
-    $query = "SELECT id, username, name, phone FROM users WHERE id = $1";
-    $result = pg_query_params($conn, $query, array($_SESSION['user_id']));
-    if ($result) {
-        if (pg_num_rows($result) > 0) {
-            $user = pg_fetch_assoc($result);
-            // Convert keys to lowercase for consistency with PostgreSQL's default behavior
-            $user = array_change_key_case($user, CASE_LOWER);
-        }
-    } else {
-        error_log("Error fetching user details: " . pg_last_error($conn));
+    $stmt = $conn->prepare("SELECT id, username, name, phone FROM users WHERE id = ?");
+    $stmt->bind_param("i", $_SESSION['user_id']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        $user = $result->fetch_assoc();
     }
+    $stmt->close();
 }
 
 
 // Fetch bookings for the logged-in user
 if (!empty($userEmail)) {
-    $query = "
+    $stmt = $conn->prepare("
         SELECT b.*, m.movieTitle, m.movieImg, m.movieGenre,
                ms.showDate, ms.showTime, ms.price as ticketPrice,
                h.hallName, h.hallType, t.theaterName
@@ -57,22 +49,20 @@ if (!empty($userEmail)) {
         LEFT JOIN movie_schedules ms ON b.scheduleID = ms.scheduleID
         LEFT JOIN theater_halls h ON b.hallID = h.hallID
         LEFT JOIN theaters t ON h.theaterID = t.theaterID
-        WHERE b.bookingEmail = $1
+        WHERE b.bookingEmail = ?
         ORDER BY ms.showDate DESC, ms.showTime DESC
-    ";
-    $result = pg_query_params($conn, $query, array($userEmail));
-    if ($result) {
-        if (pg_num_rows($result) > 0) {
-            while ($row = pg_fetch_assoc($result)) {
-                // Convert keys to lowercase for consistency with PostgreSQL's default behavior
-                $userBookings[] = array_change_key_case($row, CASE_LOWER);
-            }
-        } else {
-            $errorMessage = "You have no past bookings yet.";
+    ");
+    $stmt->bind_param("s", $userEmail);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $userBookings[] = $row;
         }
     } else {
-        $errorMessage = "Error fetching bookings: " . pg_last_error($conn);
+        $errorMessage = "You have no past bookings yet.";
     }
+    $stmt->close();
 } else {
     $errorMessage = "User email not found in session. Please log in again.";
 }
@@ -82,24 +72,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     $name = $_POST['name'];
     $phone = $_POST['phone'];
     
-    $updateQuery = "UPDATE users SET name = $1, phone = $2 WHERE id = $3";
-    $updateResult = pg_query_params($conn, $updateQuery, array($name, $phone, $_SESSION['user_id']));
+    $updateStmt = $conn->prepare("UPDATE users SET name = ?, phone = ? WHERE id = ?");
+    $updateStmt->bind_param("ssi", $name, $phone, $_SESSION['user_id']);
     
-    if ($updateResult) {
+    if ($updateStmt->execute()) {
         $message = '<div class="bg-green-600 text-white p-3 rounded-lg mb-4">Profile updated successfully!</div>';
         // Update session variables immediately
         $_SESSION['user_name'] = $name;
         $_SESSION['user_phone'] = $phone;
         // Re-fetch user data to ensure UI is consistent
-        $query = "SELECT id, username, name, phone FROM users WHERE id = $1";
-        $result = pg_query_params($conn, $query, array($_SESSION['user_id']));
-        if ($result) {
-            $user = pg_fetch_assoc($result);
-            $user = array_change_key_case($user, CASE_LOWER);
-        }
+        $stmt = $conn->prepare("SELECT id, username, name, phone FROM users WHERE id = ?");
+        $stmt->bind_param("i", $_SESSION['user_id']);
+        $stmt->execute();
+        $user = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
     } else {
-        $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error updating profile: ' . pg_last_error($conn) . '</div>';
+        $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error updating profile: ' . $updateStmt->error . '</div>';
     }
+    $updateStmt->close();
 }
 
 // Process form submission for password change
@@ -108,28 +99,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
     $new_password = $_POST['new_password'];
     $confirm_password = $_POST['confirm_password'];
     
-    // Re-fetch user data to get the current password for verification
-    $query = "SELECT password FROM users WHERE id = $1";
-    $result = pg_query_params($conn, $query, array($_SESSION['user_id']));
-    $userPasswordData = null;
-    if ($result && pg_num_rows($result) > 0) {
-        $userPasswordData = pg_fetch_assoc($result);
-        $userPasswordData = array_change_key_case($userPasswordData, CASE_LOWER);
-    }
+    // Re-fetch user data to get the current hashed password for verification
+    $stmt = $conn->prepare("SELECT password FROM users WHERE id = ?");
+    $stmt->bind_param("i", $_SESSION['user_id']);
+    $stmt->execute();
+    $userPasswordData = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
     
     // IMPORTANT: Assuming passwords are NOT HASHED based on movie_db.sql's user dump ('123').
     // In a real system, you would use password_verify($current_password, $userPasswordData['password'])
     // and password_hash($new_password, PASSWORD_DEFAULT) for new passwords.
     
-    if ($userPasswordData && $current_password === $userPasswordData['password']) { // Direct comparison for plain text passwords
+    if ($current_password === $userPasswordData['password']) { // Direct comparison for plain text passwords
         if ($new_password === $confirm_password) {
-            $updateQuery = "UPDATE users SET password = $1 WHERE id = $2";
-            $updateResult = pg_query_params($conn, $updateQuery, array($new_password, $_SESSION['user_id'])); // Storing plain text password
-            if ($updateResult) {
+            $updateStmt = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
+            $updateStmt->bind_param("si", $new_password, $_SESSION['user_id']); // Storing plain text password
+            if ($updateStmt->execute()) {
                 $message = '<div class="bg-green-600 text-white p-3 rounded-lg mb-4">Password changed successfully!</div>';
             } else {
-                $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error changing password: ' . pg_last_error($conn) . '</div>';
+                $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">Error changing password: ' . $updateStmt->error . '</div>';
             }
+            $updateStmt->close();
         } else {
             $message = '<div class="bg-red-600 text-white p-3 rounded-lg mb-4">New passwords do not match!</div>';
         }
@@ -138,8 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
     }
 }
 
-// Close PostgreSQL connection
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -296,22 +285,22 @@ pg_close($conn);
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <?php foreach ($userBookings as $booking): ?>
                             <div class="booking-item p-6 flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                                <?php if ($booking['movieimg']): ?>
-                                    <img src="../<?php echo htmlspecialchars($booking['movieimg']); ?>" alt="<?php echo htmlspecialchars($booking['movietitle']); ?>" class="w-24 h-36 object-cover rounded-md border-2 border-e94560 flex-shrink-0">
+                                <?php if ($booking['movieImg']): ?>
+                                    <img src="../<?php echo htmlspecialchars($booking['movieImg']); ?>" alt="<?php echo htmlspecialchars($booking['movieTitle']); ?>" class="w-24 h-36 object-cover rounded-md border-2 border-e94560 flex-shrink-0">
                                 <?php else: ?>
                                     <div class="w-24 h-36 bg-gray-700 rounded-md flex items-center justify-center text-gray-400 text-center text-xs border-2 border-e94560 flex-shrink-0">No Image</div>
                                 <?php endif; ?>
                                 <div class="flex-grow text-center sm:text-left">
-                                    <h4 class="text-2xl font-semibold text-white mb-2"><?php echo htmlspecialchars($booking['movietitle'] ?? 'N/A Movie'); ?></h4>
-                                    <p class="text-gray-300"><strong>Booking ID:</strong> <span class="text-e94560"><?php echo htmlspecialchars($booking['bookingid']); ?></span></p>
-                                    <p class="text-gray-300"><strong>Order ID:</strong> <?php echo htmlspecialchars($booking['orderid']); ?></p>
-                                    <p class="text-gray-300"><strong>Date:</strong> <?php echo date('l, F j, Y', strtotime($booking['showdate'] ?? '')); ?></p>
-                                    <p class="text-gray-300"><strong>Time:</strong> <?php echo date('h:i A', strtotime($booking['showtime'] ?? '')); ?></p>
-                                    <p class="text-gray-300"><strong>Theater:</strong> <?php echo htmlspecialchars($booking['theatername'] ?? 'N/A Theater'); ?></p>
-                                    <p class="text-gray-300"><strong>Hall:</strong> <?php echo htmlspecialchars($booking['hallname'] ?? 'N/A Hall'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($booking['halltype'] ?? ''))); ?>)</p>
+                                    <h4 class="text-2xl font-semibold text-white mb-2"><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A Movie'); ?></h4>
+                                    <p class="text-gray-300"><strong>Booking ID:</strong> <span class="text-e94560"><?php echo htmlspecialchars($booking['bookingID']); ?></span></p>
+                                    <p class="text-gray-300"><strong>Order ID:</strong> <?php echo htmlspecialchars($booking['ORDERID']); ?></p>
+                                    <p class="text-gray-300"><strong>Date:</strong> <?php echo date('l, F j, Y', strtotime($booking['showDate'] ?? '')); ?></p>
+                                    <p class="text-gray-300"><strong>Time:</strong> <?php echo date('h:i A', strtotime($booking['showTime'] ?? '')); ?></p>
+                                    <p class="text-gray-300"><strong>Theater:</strong> <?php echo htmlspecialchars($booking['theaterName'] ?? 'N/A Theater'); ?></p>
+                                    <p class="text-gray-300"><strong>Hall:</strong> <?php echo htmlspecialchars($booking['hallName'] ?? 'N/A Hall'); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($booking['hallType'] ?? ''))); ?>)</p>
                                     <p class="text-gray-300"><strong>Seats:</strong> <span class="font-bold text-yellow-300"><?php echo htmlspecialchars($booking['seats'] ?? 'N/A'); ?></span></p>
                                     <p class="text-white text-xl font-bold mt-2">Total Amount: ₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></p>
-                                    <a href="booking_confirmation.php?booking_id=<?php echo htmlspecialchars($booking['bookingid']); ?>" class="btn-primary mt-4 inline-block text-sm">View Full Ticket</a>
+                                    <a href="booking_confirmation.php?booking_id=<?php echo htmlspecialchars($booking['bookingID']); ?>" class="btn-primary mt-4 inline-block text-sm">View Full Ticket</a>
                                 </div>
                             </div>
                         <?php endforeach; ?>

@@ -7,20 +7,15 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $movieId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -30,27 +25,22 @@ $successMessage = '';
 
 if ($movieId > 0) {
     // Fetch current movie details
-    // Note: PostgreSQL column names are case-sensitive if created with mixed case and quoted,
-    // but often treated as lowercase if unquoted. Using double quotes for explicit case.
-    $stmtQuery = "SELECT m.*, l.\"locationName\" FROM movietable m LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" WHERE m.\"movieID\" = $1";
-    $stmtResult = pg_query_params($conn, $stmtQuery, array($movieId));
-    if ($stmtResult && pg_num_rows($stmtResult) > 0) {
-        $movie = pg_fetch_assoc($stmtResult);
-        // Convert keys to lowercase for consistency with PostgreSQL's default behavior
-        $movie = array_change_key_case($movie, CASE_LOWER);
+    $stmt = $conn->prepare("SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = ?");
+    $stmt->bind_param("i", $movieId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        $movie = $result->fetch_assoc();
     } else {
         $errorMessage = "Movie not found.";
     }
+    $stmt->close();
 } else {
     $errorMessage = "Invalid movie ID provided.";
 }
 
 // Get all locations for dropdown
-$locationsQuery = "SELECT \"locationID\", \"locationName\" FROM locations WHERE \"locationStatus\" = 'active' ORDER BY \"locationName\"";
-$locations = pg_query($conn, $locationsQuery);
-if (!$locations) {
-    die("Error fetching locations: " . pg_last_error($conn));
-}
+$locations = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
 
 // Process form submission for update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
@@ -68,19 +58,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
         $vipHall = $_POST['vipHall'] ?: 0;
         $privateHall = $_POST['privateHall'] ?: 0;
 
-        $movieImg = $movie['movieimg']; // Keep existing image by default
+        $movieImg = $movie['movieImg']; // Keep existing image by default
 
         // Handle file upload if a new image is provided
         if (isset($_FILES["movieImage"]) && $_FILES["movieImage"]["error"] == UPLOAD_ERR_OK) {
             $targetDir = "../../img/"; // Path relative to content_manager folder (two levels up)
             $fileName = basename($_FILES["movieImage"]["name"]);
-            $uniqueFileName = uniqid() . "_" . $fileName; // Generate a unique file name
-            $targetFilePath = $targetDir . $uniqueFileName;
+            $targetFilePath = $targetDir . $fileName;
             $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
             $uploadOk = 1;
 
             // Basic image validation
-            $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @ to suppress warnings
+            $check = getimagesize($_FILES["movieImage"]["tmp_name"]);
             if($check === false) { $errorMessage = "File is not an image."; $uploadOk = 0; }
             if($_FILES["movieImage"]["size"] > 5000000) { $errorMessage = "Sorry, your file is too large (max 5MB)."; $uploadOk = 0; }
             if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" && $fileType != "gif" ) { $errorMessage = "Sorry, only JPG, JPEG, PNG & GIF files are allowed."; $uploadOk = 0; }
@@ -90,13 +79,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
                 $errorMessage = "Image upload failed: " . $errorMessage;
             } else {
                 if (move_uploaded_file($_FILES["movieImage"]["tmp_name"], $targetFilePath)) {
-                    $movieImg = "img/" . $uniqueFileName; // Update image path to be stored in database (relative to project root)
+                    $movieImg = "img/" . $fileName; // Update image path to be stored in database (relative to project root)
                     // Optional: Delete old image file if it exists and is different
-                    if (!empty($movie['movieimg']) && $movie['movieimg'] != $movieImg && file_exists("../../" . $movie['movieimg'])) {
-                        // Ensure the path is within the expected img directory to prevent directory traversal
-                        if (strpos($movie['movieimg'], 'img/') === 0 && realpath("../../" . $movie['movieimg'])) {
-                            unlink("../../" . $movie['movieimg']);
-                        }
+                    if (!empty($movie['movieImg']) && $movie['movieImg'] != $movieImg && file_exists("../../" . $movie['movieImg'])) {
+                        unlink("../../" . $movie['movieImg']);
                     }
                 } else {
                     $errorMessage = "Sorry, there was an error uploading the new image.";
@@ -106,28 +92,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
         
         // Only proceed with database update if no image upload error occurred
         if (empty($errorMessage) || strpos($errorMessage, "Image upload failed") === false) {
-            $updateQuery = "UPDATE movietable SET \"movieImg\" = $1, \"movieTitle\" = $2, \"movieGenre\" = $3, \"movieDuration\" = $4, \"movieRelDate\" = $5, \"movieDirector\" = $6, \"movieActors\" = $7, \"locationID\" = $8, mainhall = $9, viphall = $10, privatehall = $11 WHERE \"movieID\" = $12";
-            $updateResult = pg_query_params($conn, $updateQuery, array($movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId));
+            $updateStmt = $conn->prepare("UPDATE movietable SET movieImg = ?, movieTitle = ?, movieGenre = ?, movieDuration = ?, movieRelDate = ?, movieDirector = ?, movieActors = ?, locationID = ?, mainhall = ?, viphall = ?, privatehall = ? WHERE movieID = ?");
+            $updateStmt->bind_param("sssssssiiddi", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId);
 
-            if ($updateResult) {
+            if ($updateStmt->execute()) {
                 $successMessage = "Movie updated successfully!";
                 // Refresh movie data after update
-                $stmtQuery = "SELECT m.*, l.\"locationName\" FROM movietable m LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" WHERE m.\"movieID\" = $1";
-                $stmtResult = pg_query_params($conn, $stmtQuery, array($movieId));
-                $movie = pg_fetch_assoc($stmtResult); // Update $movie variable with new data
-                $movie = array_change_key_case($movie, CASE_LOWER);
+                $stmt = $conn->prepare("SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = ?");
+                $stmt->bind_param("i", $movieId);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $movie = $result->fetch_assoc(); // Update $movie variable with new data
+                $stmt->close();
             } else {
-                $errorMessage = "Error updating movie: " . pg_last_error($conn);
-                // If DB update fails, consider deleting the newly uploaded image file to clean up
-                if ($movieImg != $movie['movieimg'] && file_exists("../../" . $movieImg)) {
-                    unlink("../../" . $movieImg);
-                }
+                $errorMessage = "Error updating movie: " . $updateStmt->error;
             }
+            $updateStmt->close();
         }
     }
 }
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -325,7 +310,7 @@ pg_close($conn);
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Edit Movie: <?php echo htmlspecialchars($movie['movietitle'] ?? 'N/A'); ?></h1>
+                    <h1>Edit Movie: <?php echo htmlspecialchars($movie['movieTitle'] ?? 'N/A'); ?></h1>
                     <a href="movies.php" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Movies
                     </a>
@@ -352,39 +337,39 @@ pg_close($conn);
                 <?php if ($movie): ?>
                     <div class="form-container">
                         <form action="" method="POST" enctype="multipart/form-data">
-                            <input type="hidden" name="movieID" value="<?php echo htmlspecialchars($movie['movieid']); ?>">
+                            <input type="hidden" name="movieID" value="<?php echo htmlspecialchars($movie['movieID']); ?>">
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="movieTitle">Movie Title</label>
-                                        <input type="text" class="form-control" id="movieTitle" name="movieTitle" value="<?php echo htmlspecialchars($movie['movietitle']); ?>" required>
+                                        <input type="text" class="form-control" id="movieTitle" name="movieTitle" value="<?php echo htmlspecialchars($movie['movieTitle']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="movieGenre">Genre</label>
-                                        <input type="text" class="form-control" id="movieGenre" name="movieGenre" value="<?php echo htmlspecialchars($movie['moviegenre']); ?>" required>
+                                        <input type="text" class="form-control" id="movieGenre" name="movieGenre" value="<?php echo htmlspecialchars($movie['movieGenre']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="movieDuration">Duration (minutes)</label>
-                                        <input type="number" class="form-control" id="movieDuration" name="movieDuration" value="<?php echo htmlspecialchars($movie['movieduration']); ?>" required>
+                                        <input type="number" class="form-control" id="movieDuration" name="movieDuration" value="<?php echo htmlspecialchars($movie['movieDuration']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="movieRelDate">Release Date</label>
-                                        <input type="date" class="form-control" id="movieRelDate" name="movieRelDate" value="<?php echo htmlspecialchars($movie['moviereldate']); ?>" required>
+                                        <input type="date" class="form-control" id="movieRelDate" name="movieRelDate" value="<?php echo htmlspecialchars($movie['movieRelDate']); ?>" required>
                                     </div>
                                 </div>
                                 
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="movieDirector">Director</label>
-                                        <input type="text" class="form-control" id="movieDirector" name="movieDirector" value="<?php echo htmlspecialchars($movie['moviedirector']); ?>" required>
+                                        <input type="text" class="form-control" id="movieDirector" name="movieDirector" value="<?php echo htmlspecialchars($movie['movieDirector']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="movieActors">Actors</label>
-                                        <input type="text" class="form-control" id="movieActors" name="movieActors" value="<?php echo htmlspecialchars($movie['movieactors']); ?>" required>
+                                        <input type="text" class="form-control" id="movieActors" name="movieActors" value="<?php echo htmlspecialchars($movie['movieActors']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
@@ -393,11 +378,11 @@ pg_close($conn);
                                             <option value="">Select Location (Optional)</option>
                                             <?php
                                             // Reset pointer for locations query
-                                            if (pg_num_rows($locations) > 0) {
-                                                pg_result_seek($locations, 0);
+                                            if ($locations->num_rows > 0) {
+                                                $locations->data_seek(0);
                                             }
-                                            while ($location = pg_fetch_assoc($locations)): ?>
-                                                <option value="<?php echo htmlspecialchars($location['locationID']); ?>" <?php echo ($movie['locationid'] == $location['locationID']) ? 'selected' : ''; ?>>
+                                            while ($location = $locations->fetch_assoc()): ?>
+                                                <option value="<?php echo htmlspecialchars($location['locationID']); ?>" <?php echo ($movie['locationID'] == $location['locationID']) ? 'selected' : ''; ?>>
                                                     <?php echo htmlspecialchars($location['locationName']); ?>
                                                 </option>
                                             <?php endwhile; ?>
@@ -406,8 +391,8 @@ pg_close($conn);
                                     
                                     <div class="form-group">
                                         <label for="movieImage">Movie Poster</label>
-                                        <?php if (!empty($movie['movieimg'])): ?>
-                                            <img id="current_preview" src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" alt="Current Poster" class="movie-image-preview">
+                                        <?php if (!empty($movie['movieImg'])): ?>
+                                            <img id="current_preview" src="../../<?php echo htmlspecialchars($movie['movieImg']); ?>" alt="Current Poster" class="movie-image-preview">
                                         <?php else: ?>
                                             <img id="current_preview" src="https://placehold.co/200x300/cccccc/333333?text=No+Img" alt="No Current Poster" class="movie-image-preview">
                                         <?php endif; ?>
@@ -417,7 +402,7 @@ pg_close($conn);
                                 </div>
                             </div>
                             
-                            <!-- Hall Price inputs -->
+                            <!-- Hall Price inputs (if still needed, otherwise remove) -->
                             <div class="row">
                                 <div class="col-md-4">
                                     <div class="form-group">
@@ -469,7 +454,7 @@ pg_close($conn);
                 reader.readAsDataURL(input.files[0]);
             } else {
                 // If no new file selected, revert to current image or placeholder
-                preview.src = "<?php echo !empty($movie['movieimg']) ? '../../' . htmlspecialchars($movie['movieimg']) : 'https://placehold.co/200x300/cccccc/333333?text=No+Img'; ?>";
+                preview.src = "<?php echo !empty($movie['movieImg']) ? '../../' . htmlspecialchars($movie['movieImg']) : 'https://placehold.co/200x300/cccccc/333333?text=No+Img'; ?>";
             }
         }
     </script>

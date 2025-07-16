@@ -7,51 +7,32 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 // Get counts relevant to Content Manager
-// Note: PostgreSQL column names are case-sensitive if created with mixed case and quoted,
-// but often treated as lowercase if unquoted. Using double quotes for explicit case.
-$movieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movietable");
-if (!$movieCountResult) {
-    die("Error fetching movie count: " . pg_last_error($conn));
-}
-$movieCount = pg_fetch_assoc($movieCountResult)['count'];
-
-$activeMovieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movie_schedules WHERE \"scheduleStatus\" = 'active' AND \"showDate\" >= CURRENT_DATE");
-if (!$activeMovieCountResult) {
-    die("Error fetching active movie count: " . pg_last_error($conn));
-}
-$activeMovieCount = pg_fetch_assoc($activeMovieCountResult)['count'];
+$movieCount = $conn->query("SELECT COUNT(*) as count FROM movietable")->fetch_assoc()['count'];
+$activeMovieCount = $conn->query("SELECT COUNT(*) as count FROM movie_schedules WHERE scheduleStatus = 'active' AND showDate >= CURDATE()")->fetch_assoc()['count'];
 
 
 // Get recent movies added/updated
 $recentMoviesQuery = "
-    SELECT m.\"movieID\", m.\"movieTitle\", m.\"movieGenre\", m.\"movieDuration\", m.\"movieImg\", m.\"movieRelDate\", l.\"locationName\"
+    SELECT m.movieID, m.movieTitle, m.movieGenre, m.movieDuration, m.movieImg, m.movieRelDate, l.locationName
     FROM movietable m
-    LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\"
-    ORDER BY m.\"movieID\" DESC LIMIT 5
+    LEFT JOIN locations l ON m.locationID = l.locationID
+    ORDER BY m.movieID DESC LIMIT 5
 ";
-$recentMovies = pg_query($conn, $recentMoviesQuery);
-if (!$recentMovies) {
-    die("Error fetching recent movies: " . pg_last_error($conn));
-}
+$recentMovies = $conn->query($recentMoviesQuery);
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -365,18 +346,18 @@ pg_close($conn);
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <?php if (pg_num_rows($recentMovies) > 0): ?>
-                                            <?php while ($movie = pg_fetch_assoc($recentMovies)): ?>
+                                        <?php if ($recentMovies->num_rows > 0): ?>
+                                            <?php while ($movie = $recentMovies->fetch_assoc()): ?>
                                                 <tr>
-                                                    <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                                     <td>
-                                                        <img src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image-mini">
+                                                        <img src="../../<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image-mini">
                                                     </td>
-                                                    <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
-                                                    <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
-                                                    <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
-                                                    <td><?php echo htmlspecialchars($movie['moviereldate'] ?? 'N/A'); ?></td> <!-- Added N/A check here -->
-                                                    <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
+                                                    <td><?php echo htmlspecialchars($movie['movieRelDate'] ?? 'N/A'); ?></td> <!-- Added N/A check here -->
+                                                    <td><?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></td>
                                                 </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>

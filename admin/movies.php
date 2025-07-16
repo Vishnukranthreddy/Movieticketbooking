@@ -3,24 +3,19 @@ session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Content Manager (roleID 3)
 if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 3)) {
-    header("Location: ../admin/index.php"); // Corrected path
+    header("Location: index.php");
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 // Handle movie deletion
@@ -30,31 +25,38 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $movieId = $_GET['delete'];
     
     // Check if the movie exists
-    $checkQuery = "SELECT \"movieID\" FROM movietable WHERE \"movieID\" = $1";
-    $checkResult = pg_query_params($conn, $checkQuery, array($movieId));
+    $checkQuery = $conn->prepare("SELECT movieID FROM movietable WHERE movieID = ?");
+    $checkQuery->bind_param("i", $movieId);
+    $checkQuery->execute();
+    $result = $checkQuery->get_result();
     
-    if ($checkResult && pg_num_rows($checkResult) > 0) {
-        // Check if movie is used in schedules
-        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"movieID\" = $1";
-        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
-        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
+    if ($result->num_rows > 0) {
+        // IMPORTANT: Check for foreign key dependencies before deleting!
+        // E.g., check movie_schedules table
+        $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE movieID = ?");
+        $checkSchedulesQuery->bind_param("i", $movieId);
+        $checkSchedulesQuery->execute();
+        $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
+        $checkSchedulesQuery->close();
 
         if ($schedulesCount > 0) {
-            $errorMessage = "Cannot delete movie. It is associated with " . $schedulesCount . " schedule(s). Delete schedules first.";
+            $errorMessage = "Cannot delete movie. It is associated with $schedulesCount schedule(s). Delete schedules first.";
         } else {
             // Delete the movie
-            $deleteQuery = "DELETE FROM movietable WHERE \"movieID\" = $1";
-            $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
+            $deleteQuery = $conn->prepare("DELETE FROM movietable WHERE movieID = ?");
+            $deleteQuery->bind_param("i", $movieId);
             
-            if ($deleteResult) {
+            if ($deleteQuery->execute()) {
                 $successMessage = "Movie deleted successfully!";
             } else {
-                $errorMessage = "Error deleting movie: " . pg_last_error($conn);
+                $errorMessage = "Error deleting movie: " . $conn->error;
             }
+            $deleteQuery->close();
         }
     } else {
         $errorMessage = "Movie not found!";
     }
+    $checkQuery->close();
 }
 
 // Get all movies with pagination
@@ -66,42 +68,57 @@ $offset = ($page - 1) * $recordsPerPage;
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
 $params = [];
-$param_index = 1;
+$types = '';
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    // Using ILIKE for case-insensitive search in PostgreSQL
-    $searchCondition = "WHERE \"movieTitle\" ILIKE $" . ($param_index++) . " OR \"movieGenre\" ILIKE $" . ($param_index++) . " OR \"movieDirector\" ILIKE $" . ($param_index++) . "";
+    $searchCondition = "WHERE movieTitle LIKE ? OR movieGenre LIKE ? OR movieDirector LIKE ?";
     $params = [$searchParam, $searchParam, $searchParam];
+    $types = "sss";
 }
 
 // Count total records for pagination
-$countQuery = "SELECT COUNT(*) as total FROM movietable " . $searchCondition;
+$countQuery = "SELECT COUNT(*) as total FROM movietable $searchCondition";
 
-$stmtCountResult = pg_query_params($conn, $countQuery, $params);
-if (!$stmtCountResult) {
-    die("Error counting movies: " . pg_last_error($conn));
+$stmtCount = $conn->prepare($countQuery);
+if (!empty($searchCondition)) {
+    $stmtCount->bind_param($types, ...$params);
 }
-$totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
+$stmtCount->execute();
+$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
+$stmtCount->close();
+
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get movies for current page
-$query = "
-    SELECT m.*, l.\"locationName\" 
-    FROM movietable m 
-    LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" 
-    " . $searchCondition . " 
-    ORDER BY m.\"movieID\" DESC 
-    LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
+$query = "SELECT m.*, l.locationName 
+          FROM movietable m 
+          LEFT JOIN locations l ON m.locationID = l.locationID 
+          $searchCondition 
+          ORDER BY m.movieID DESC 
+          LIMIT ?, ?";
 
-$query_params = array_merge($params, [$recordsPerPage, $offset]);
-$movies = pg_query_params($conn, $query, $query_params);
+$stmt = $conn->prepare($query);
 
-if (!$movies) {
-    die("Error fetching movies: " . pg_last_error($conn));
+// Rebind parameters for the main query
+$query_params = $params; // Copy search parameters
+$query_types = $types; // Copy search types
+
+$query_params[] = $offset;
+$query_params[] = $recordsPerPage;
+$query_types .= "ii";
+
+if (!empty($searchCondition)) {
+    $stmt->bind_param($query_types, ...$query_params);
+} else {
+    $stmt->bind_param("ii", $offset, $recordsPerPage);
 }
 
-pg_close($conn);
+$stmt->execute();
+$movies = $stmt->get_result();
+$stmt->close();
+
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -215,7 +232,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../admin/logout.php">Sign out</a>
+                <a class="nav-link" href="logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -238,49 +255,47 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/theaters.php">
+                            <a class="nav-link" href="theaters.php">
                                 <i class="fas fa-building"></i>
                                 Theaters
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/locations.php">
+                            <a class="nav-link" href="locations.php">
                                 <i class="fas fa-map-marker-alt"></i>
                                 Locations
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/schedules.php">
+                            <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/bookings.php">
+                            <a class="nav-link" href="bookings.php">
                                 <i class="fas fa-ticket-alt"></i>
                                 Bookings
                             </a>
                         </li>
-                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees Users, Reports, Settings in Content Manager sidebar ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="../admin/users.php">
+                            <a class="nav-link" href="users.php">
                                 <i class="fas fa-users"></i>
                                 Users
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../admin/reports.php">
+                            <a class="nav-link" href="reports.php">
                                 <i class="fas fa-chart-bar"></i>
-                                All Reports
+                                Reports
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../admin/settings.php">
+                            <a class="nav-link" href="settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
                             </a>
                         </li>
-                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -345,8 +360,8 @@ pg_close($conn);
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if (pg_num_rows($movies) > 0): ?>
-                                    <?php while ($movie = pg_fetch_assoc($movies)): ?>
+                                <?php if ($movies->num_rows > 0): ?>
+                                    <?php while ($movie = $movies->fetch_assoc()): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                             <td>

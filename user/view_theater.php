@@ -1,20 +1,15 @@
 <?php
 session_start();
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $panoramaSource = null;
@@ -43,14 +38,16 @@ if (isset($_GET['hall_panorama_img']) && !empty($_GET['hall_panorama_img'])) {
     $theaterId = $_GET['theater_id'];
 
     // Fetch theater details including the main theater panorama image path
-    $query = "SELECT \"theaterName\", \"theaterPanoramaImg\" FROM theaters WHERE \"theaterID\" = $1";
-    $result = pg_query_params($conn, $query, array($theaterId));
-    
-    if ($result) {
-        if (pg_num_rows($result) > 0) {
-            $theaterData = pg_fetch_assoc($result);
-            // PostgreSQL column names are case-sensitive if double-quoted, otherwise lowercase.
-            // Assuming they are stored as 'theaterName' and 'theaterPanoramaImg' in the database.
+    $stmt = $conn->prepare("SELECT theaterName, theaterPanoramaImg FROM theaters WHERE theaterID = ?");
+    if ($stmt === false) {
+        $errorMessage = "Database prepare error for theater details: " . $conn->error;
+        $sourceType = 'error';
+    } else {
+        $stmt->bind_param("i", $theaterId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($result->num_rows > 0) {
+            $theaterData = $result->fetch_assoc();
             $displayName = $theaterData['theaterName'];
             if (!empty($theaterData['theaterPanoramaImg'])) {
                 // Basic validation of the path (ensure it starts with 'img/')
@@ -69,17 +66,14 @@ if (isset($_GET['hall_panorama_img']) && !empty($_GET['hall_panorama_img'])) {
             $errorMessage = "Theater not found with ID: " . $theaterId . ".";
             $sourceType = 'error';
         }
-    } else {
-        $errorMessage = "Database query error for theater details: " . pg_last_error($conn);
-        $sourceType = 'error';
+        $stmt->close();
     }
 } else {
     $errorMessage = "No specific theater or hall ID provided to view.";
     $sourceType = 'error';
 }
 
-// Close PostgreSQL connection
-pg_close($conn);
+$conn->close();
 
 // Final check if a valid panorama source was determined.
 // If sourceType is 'error' or 'none', ensure $hasValidPanoramaSource is false.

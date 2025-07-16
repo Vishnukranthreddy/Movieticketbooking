@@ -1,26 +1,21 @@
 <?php
 session_start();
 
-// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
-if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
-    header("Location: ../admin/index.php"); // Redirect to central admin login
+// RBAC: Accessible only by Super Admin (roleID 1)
+if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
+    header("Location: index.php"); // Redirect to central admin login
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db"; // Ensured to be movie_db
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $theaterId = isset($_GET['theater_id']) ? (int)$_GET['theater_id'] : 0;
@@ -31,14 +26,21 @@ $successMessage = '';
 
 if ($theaterId > 0) {
     // Fetch theater name
-    $stmtTheaterQuery = "SELECT \"theaterName\" FROM theaters WHERE \"theaterID\" = $1";
-    $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
-    if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
-        $rowTheater = pg_fetch_assoc($stmtTheaterResult);
-        $theaterName = $rowTheater['theaterName'];
+    $stmtTheater = $conn->prepare("SELECT theaterName FROM theaters WHERE theaterID = ?");
+    if ($stmtTheater === false) {
+        $errorMessage = "Failed to prepare theater name query: " . $conn->error;
+        $theaterId = 0; // Invalidate if query prepare fails
     } else {
-        $errorMessage = "Theater not found for ID: " . $theaterId;
-        $theaterId = 0; // Invalidate if not found
+        $stmtTheater->bind_param("i", $theaterId);
+        $stmtTheater->execute();
+        $resultTheater = $stmtTheater->get_result();
+        if ($rowTheater = $resultTheater->fetch_assoc()) {
+            $theaterName = $rowTheater['theaterName'];
+        } else {
+            $errorMessage = "Theater not found for ID: " . $theaterId;
+            $theaterId = 0; // Invalidate theaterId if not found
+        }
+        $stmtTheater->close();
     }
 
     // Only proceed if theaterId is still valid after fetching its name
@@ -48,36 +50,51 @@ if ($theaterId > 0) {
             $hallId = $_GET['delete_hall'];
 
             // Check for dependencies (schedules) before deleting hall
-            $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallID\" = $1";
-            $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
-            $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
-
-            if ($schedulesCount > 0) {
-                $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
+            $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE hallID = ?");
+            if ($checkSchedulesQuery === false) {
+                $errorMessage = "Failed to prepare schedule check query: " . $conn->error;
             } else {
-                // Get hall panorama image path before deletion to remove the file
-                $stmtImgQuery = "SELECT \"hallPanoramaImg\" FROM theater_halls WHERE \"hallID\" = $1";
-                $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
-                $hallPanoramaImgPath = null;
-                if ($stmtImgResult && pg_num_rows($stmtImgResult) > 0) {
-                    $row = pg_fetch_assoc($stmtImgResult);
-                    $hallPanoramaImgPath = $row['hallPanoramaImg'];
-                }
+                $checkSchedulesQuery->bind_param("i", $hallId);
+                $checkSchedulesQuery->execute();
+                $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
+                $checkSchedulesQuery->close();
 
-                $deleteHallQuery = "DELETE FROM theater_halls WHERE \"hallID\" = $1 AND \"theaterID\" = $2";
-                $deleteHallResult = pg_query_params($conn, $deleteHallQuery, array($hallId, $theaterId));
-                
-                if ($deleteHallResult) {
-                    $successMessage = "Hall deleted successfully!";
-                    // Delete the associated image file if it exists and is a valid path
-                    if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from theater_manager/ to project root
-                        // Ensure the path is within the expected img/panoramas directory to prevent directory traversal
-                        if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
-                            unlink("../" . $hallPanoramaImgPath);
+                if ($schedulesCount > 0) {
+                    $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
+                } else {
+                    // Get hall panorama image path before deletion to remove the file
+                    $stmtImg = $conn->prepare("SELECT hallPanoramaImg FROM theater_halls WHERE hallID = ?");
+                    if ($stmtImg === false) {
+                        $errorMessage = "Failed to prepare image path query: " . $conn->error;
+                    } else {
+                        $stmtImg->bind_param("i", $hallId);
+                        $stmtImg->execute();
+                        $resultImg = $stmtImg->get_result();
+                        $hallPanoramaImgPath = null;
+                        if ($row = $resultImg->fetch_assoc()) {
+                            $hallPanoramaImgPath = $row['hallPanoramaImg'];
+                        }
+                        $stmtImg->close();
+
+                        $deleteHallQuery = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ? AND theaterID = ?");
+                        if ($deleteHallQuery === false) {
+                            $errorMessage = "Failed to prepare delete hall query: " . $conn->error;
+                        } else {
+                            $deleteHallQuery->bind_param("ii", $hallId, $theaterId);
+                            if ($deleteHallQuery->execute()) {
+                                $successMessage = "Hall deleted successfully!";
+                                // Delete the associated image file if it exists and is a valid path
+                                if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from admin/ to project root
+                                    if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
+                                        unlink("../" . $hallPanoramaImgPath);
+                                    }
+                                }
+                            } else {
+                                $errorMessage = "Error deleting hall: " . $conn->error;
+                            }
+                            $deleteHallQuery->close();
                         }
                     }
-                } else {
-                    $errorMessage = "Error deleting hall: " . pg_last_error($conn);
                 }
             }
         }
@@ -86,15 +103,15 @@ if ($theaterId > 0) {
         if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_hall'])) {
             $hallName = $_POST['hallName'];
             $hallType = $_POST['hallType'];
-            $totalSeats = (int)$_POST['totalSeats'];
+            $totalSeats = (int)$_POST['totalSeats']; // Explicitly cast to int
             $hallStatus = $_POST['hallStatus'];
             
-            $hallPanoramaImg = null;
-            $uploadOk = 1;
+            $hallPanoramaImg = null; // Initialize to null
+            $uploadOk = 1; // Flag for panorama image upload status
 
             // Handle panorama image upload if provided
             if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                $targetDir = "../img/panoramas/"; // Path relative to theater_manager/ folder
+                $targetDir = "../img/panoramas/"; // Path relative to admin/ folder
                 if (!is_dir($targetDir)) {
                     mkdir($targetDir, 0755, true);
                 }
@@ -120,22 +137,29 @@ if ($theaterId > 0) {
                     }
                 }
             } else if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+                // Handle other potential upload errors if a file was selected but had an error
                 $errorMessage = "File upload error for panorama: " . $_FILES["hallPanoramaImage"]["error"];
                 $uploadOk = 0;
             }
 
             if ($uploadOk !== 0) {
-                $addHallQuery = "INSERT INTO theater_halls (\"theaterID\", \"hallName\", \"hallType\", \"totalSeats\", \"hallStatus\", \"hallPanoramaImg\") VALUES ($1, $2, $3, $4, $5, $6)";
-                $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
-                
-                if ($addHallResult) {
-                    $successMessage = "Hall added successfully!";
+                $addHallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus, hallPanoramaImg) VALUES (?, ?, ?, ?, ?, ?)");
+                if ($addHallStmt === false) {
+                    $errorMessage = "Failed to prepare add hall query: " . $conn->error;
                 } else {
-                    $errorMessage = "Error adding hall to database: " . pg_last_error($conn);
-                    // Clean up uploaded file on DB error
-                    if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
-                        unlink("../" . $hallPanoramaImg);
+                    // CORRECTED bind_param for INSERT: (i, s, s, i, s, s)
+                    // The string "isisss" is correct for 6 variables: i (theaterId), s (hallName), s (hallType), i (totalSeats), s (hallStatus), s (hallPanoramaImg)
+                    $addHallStmt->bind_param("isisss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg); // CORRECTED TYPE STRING
+                    if ($addHallStmt->execute()) {
+                        $successMessage = "Hall added successfully!";
+                    } else {
+                        $errorMessage = "Error adding hall to database: " . $addHallStmt->error;
+                        // Clean up uploaded file on DB error
+                        if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
+                            unlink("../" . $hallPanoramaImg);
+                        }
                     }
+                    $addHallStmt->close();
                 }
             }
         }
@@ -145,11 +169,11 @@ if ($theaterId > 0) {
             $hallIdToUpdate = $_POST['edit_hallId'];
             $hallName = $_POST['edit_hallName'];
             $hallType = $_POST['edit_hallType'];
-            $totalSeats = (int)$_POST['edit_totalSeats'];
+            $totalSeats = (int)$_POST['edit_totalSeats']; // Explicitly cast to int
             $hallStatus = $_POST['edit_hallStatus'];
 
-            $currentHallPanoramaImg = $_POST['current_hall_panorama_img'] ?? null;
-            $newHallPanoramaImg = $currentHallPanoramaImg;
+            $currentHallPanoramaImg = $_POST['current_hall_panorama_img'] ?? null; // Get existing path from hidden field
+            $newHallPanoramaImg = $currentHallPanoramaImg; // Assume current image by default
             $uploadOk = 1;
 
             // Handle new panorama image upload for update
@@ -188,26 +212,39 @@ if ($theaterId > 0) {
             }
 
             if ($uploadOk !== 0) {
-                $updateHallQuery = "UPDATE theater_halls SET \"hallName\" = $1, \"hallType\" = $2, \"totalSeats\" = $3, \"hallStatus\" = $4, \"hallPanoramaImg\" = $5 WHERE \"hallID\" = $6 AND \"theaterID\" = $7";
-                $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
-                
-                if ($updateHallResult) {
-                    $successMessage = "Hall updated successfully!";
+                $updateHallStmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ?, hallPanoramaImg = ? WHERE hallID = ? AND theaterID = ?");
+                if ($updateHallStmt === false) {
+                    $errorMessage = "Failed to prepare update hall query: " . $conn->error;
                 } else {
-                    $errorMessage = "Error updating hall in database: " . pg_last_error($conn);
-                    if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
-                        unlink("../" . $newHallPanoramaImg); // Clean up newly uploaded file on DB error
+                    // CORRECTED bind_param for UPDATE: 7 variables (s, s, i, s, s, i, i)
+                    $updateHallStmt->bind_param("ssissii", $hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId); // CORRECTED TYPE STRING
+                    if ($updateHallStmt->execute()) {
+                        $successMessage = "Hall updated successfully!";
+                    } else {
+                        $errorMessage = "Error updating hall in database: " . $updateHallStmt->error;
+                        if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
+                            unlink("../" . $newHallPanoramaImg); // Clean up newly uploaded file on DB error
+                        }
                     }
+                    $updateHallStmt->close();
                 }
             }
         }
 
         // Get all halls for this theater (re-fetch after any add/delete/update operation)
-        $hallsQuery = "SELECT * FROM theater_halls WHERE \"theaterID\" = $1 ORDER BY \"hallName\"";
-        $halls = pg_query_params($conn, $hallsQuery, array($theaterId));
-        if (!$halls) {
-            $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to fetch halls: " . pg_last_error($conn);
-            $halls = null;
+        if ($theaterId > 0) {
+            $hallsQuery = $conn->prepare("SELECT * FROM theater_halls WHERE theaterID = ? ORDER BY hallName");
+            if ($hallsQuery === false) {
+                $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to prepare hall fetch query: " . $conn->error;
+                $halls = null;
+            } else {
+                $hallsQuery->bind_param("i", $theaterId);
+                $hallsQuery->execute();
+                $halls = $hallsQuery->get_result();
+                $hallsQuery->close();
+            }
+        } else {
+            $halls = null; // No halls if theaterId is invalid
         }
 
     } else { // theaterId is 0 or invalid
@@ -216,7 +253,7 @@ if ($theaterId > 0) {
     }
 } // Close the main if ($theaterId > 0) block
 
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -352,7 +389,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../admin/logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -480,7 +517,7 @@ pg_close($conn);
                     <div class="alert alert-info text-center">
                         Please select a theater from the <a href="theaters.php">Theaters list</a> to manage its halls.
                     </div>
-                <?php elseif ($halls && pg_num_rows($halls) > 0): ?>
+                <?php elseif ($halls && $halls->num_rows > 0): ?>
                     <div class="table-container">
                         <div class="table-responsive">
                             <table class="table table-striped table-hover">
@@ -496,7 +533,7 @@ pg_close($conn);
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php while ($hall = pg_fetch_assoc($halls)): ?>
+                                    <?php while ($hall = $halls->fetch_assoc()): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($hall['hallID']); ?></td>
                                             <td><?php echo htmlspecialchars($hall['hallName']); ?></td>
@@ -508,7 +545,7 @@ pg_close($conn);
                                             <td><?php echo htmlspecialchars($hall['totalSeats']); ?></td>
                                             <td>
                                                 <?php if (!empty($hall['hallPanoramaImg'])): ?>
-                                                    <img src="../<?php echo htmlspecialchars($hall['hallPanoramaImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x50/cccccc/333333?text=N/A';" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
+                                                    <img src="../<?php echo htmlspecialchars($hall['hallPanoramaImg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
                                                 <?php else: ?>
                                                     N/A
                                                 <?php endif; ?>
@@ -555,149 +592,149 @@ pg_close($conn);
                 <div class="modal-header">
                     <h5 class="modal-title" id="addHallModalLabel">Add New Hall to <?php echo htmlspecialchars($theaterName); ?></h5>
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
+                        <span aria-hidden="true">&times;
+                        </button>
+                    </div>
+                    <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label for="hallName">Hall Name</label>
+                                <input type="text" class="form-control" id="hallName" name="hallName" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="hallType">Hall Type</label>
+                                <select class="form-control" id="hallType" name="hallType" required>
+                                    <option value="main-hall">Main Hall</option>
+                                    <option value="vip-hall">VIP Hall</option>
+                                    <option value="private-hall">Private Hall</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="totalSeats">Total Seats</label>
+                                <input type="number" class="form-control" id="totalSeats" name="totalSeats" required min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="hallStatus">Status</label>
+                                <select class="form-control" id="hallStatus" name="hallStatus" required>
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="hallPanoramaImage">Hall Panorama Image (Optional)</label>
+                                <input type="file" class="form-control-file" id="hallPanoramaImage" name="hallPanoramaImage" onchange="previewHallPanorama(this, 'addHallPanoramaPreview')">
+                                <img id="addHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                                <small class="form-text text-muted">Upload a 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                            <button type="submit" name="add_hall" class="btn btn-primary">Add Hall</button>
+                        </div>
+                    </form>
                 </div>
-                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
-                    <div class="modal-body">
-                        <div class="form-group">
-                            <label for="hallName">Hall Name</label>
-                            <input type="text" class="form-control" id="hallName" name="hallName" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="hallType">Hall Type</label>
-                            <select class="form-control" id="hallType" name="hallType" required>
-                                <option value="main-hall">Main Hall</option>
-                                <option value="vip-hall">VIP Hall</option>
-                                <option value="private-hall">Private Hall</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="totalSeats">Total Seats</label>
-                            <input type="number" class="form-control" id="totalSeats" name="totalSeats" required min="1">
-                        </div>
-                        <div class="form-group">
-                            <label for="hallStatus">Status</label>
-                            <select class="form-control" id="hallStatus" name="hallStatus" required>
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="hallPanoramaImage">Hall Panorama Image (Optional)</label>
-                            <input type="file" class="form-control-file" id="hallPanoramaImage" name="hallPanoramaImage" onchange="previewHallPanorama(this, 'addHallPanoramaPreview')">
-                            <img id="addHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
-                            <small class="form-text text-muted">Upload a 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                        <button type="submit" name="add_hall" class="btn btn-primary">Add Hall</button>
-                    </div>
-                </form>
             </div>
         </div>
-    </div>
 
-    <!-- Edit Hall Modal -->
-    <div class="modal fade" id="editHallModal" tabindex="-1" role="dialog" aria-labelledby="editHallModalLabel" aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="editHallModalLabel">Edit Hall</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
+        <!-- Edit Hall Modal -->
+        <div class="modal fade" id="editHallModal" tabindex="-1" role="dialog" aria-labelledby="editHallModalLabel" aria-hidden="true">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="editHallModalLabel">Edit Hall</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
+                        <div class="modal-body">
+                            <input type="hidden" id="edit_hallId" name="edit_hallId">
+                            <input type="hidden" id="current_hall_panorama_img" name="current_hall_panorama_img">
+                            <div class="form-group">
+                                <label for="edit_hallName">Hall Name</label>
+                                <input type="text" class="form-control" id="edit_hallName" name="edit_hallName" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit_hallType">Hall Type</label>
+                                <select class="form-control" id="edit_hallType" name="edit_hallType" required>
+                                    <option value="main-hall">Main Hall</option>
+                                    <option value="vip-hall">VIP Hall</option>
+                                    <option value="private-hall">Private Hall</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit_totalSeats">Total Seats</label>
+                                <input type="number" class="form-control" id="edit_totalSeats" name="edit_totalSeats" required min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit_hallStatus">Status</label>
+                                <select class="form-control" id="edit_hallStatus" name="edit_hallStatus" required>
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Inactive</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="editHallPanoramaImage">Hall Panorama Image (Optional)</label>
+                                <!-- Image preview for edit modal -->
+                                <img id="editHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                                <input type="file" class="form-control-file" id="editHallPanoramaImage" name="editHallPanoramaImage" onchange="previewHallPanorama(this, 'editHallPanoramaPreview')">
+                                <small class="form-text text-muted">Upload a new 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                            <button type="submit" name="update_hall" class="btn btn-primary">Update Hall</button>
+                        </div>
+                    </form>
                 </div>
-                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
-                    <div class="modal-body">
-                        <input type="hidden" id="edit_hallId" name="edit_hallId">
-                        <input type="hidden" id="current_hall_panorama_img" name="current_hall_panorama_img">
-                        <div class="form-group">
-                            <label for="edit_hallName">Hall Name</label>
-                            <input type="text" class="form-control" id="edit_hallName" name="edit_hallName" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_hallType">Hall Type</label>
-                            <select class="form-control" id="edit_hallType" name="edit_hallType" required>
-                                <option value="main-hall">Main Hall</option>
-                                <option value="vip-hall">VIP Hall</option>
-                                <option value="private-hall">Private Hall</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_totalSeats">Total Seats</label>
-                            <input type="number" class="form-control" id="edit_totalSeats" name="edit_totalSeats" required min="1">
-                        </div>
-                        <div class="form-group">
-                            <label for="edit_hallStatus">Status</label>
-                            <select class="form-control" id="edit_hallStatus" name="edit_hallStatus" required>
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="editHallPanoramaImage">Hall Panorama Image (Optional)</label>
-                            <!-- Image preview for edit modal -->
-                            <img id="editHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
-                            <input type="file" class="form-control-file" id="editHallPanoramaImage" name="editHallPanoramaImage" onchange="previewHallPanorama(this, 'editHallPanoramaPreview')">
-                            <small class="form-text text-muted">Upload a new 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                        <button type="submit" name="update_hall" class="btn btn-primary">Update Hall</button>
-                    </div>
-                </form>
             </div>
         </div>
-    </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-    <script>
-        // Function to preview image for both add and edit modals
-        function previewHallPanorama(input, previewId) {
-            var preview = document.getElementById(previewId);
-            if (input.files && input.files[0]) {
-                var reader = new FileReader();
-                reader.onload = function(e) {
-                    preview.src = e.target.result;
-                    preview.style.display = 'block';
+        <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+        <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+        <script>
+            // Function to preview image for both add and edit modals
+            function previewHallPanorama(input, previewId) {
+                var preview = document.getElementById(previewId);
+                if (input.files && input.files[0]) {
+                    var reader = new FileReader();
+                    reader.onload = function(e) {
+                        preview.src = e.target.result;
+                        preview.style.display = 'block';
+                    }
+                    reader.readAsDataURL(input.files[0]);
+                } else {
+                    preview.style.display = 'none';
+                    preview.src = '#'; // Clear src
                 }
-                reader.readAsDataURL(input.files[0]);
-            } else {
-                preview.style.display = 'none';
-                preview.src = '#'; // Clear src
             }
-        }
 
-        // Fill edit modal with hall data
-        $('.edit-hall').click(function() {
-            var id = $(this).data('id');
-            var name = $(this).data('name');
-            var type = $(this).data('type');
-            var seats = $(this).data('seats');
-            var status = $(this).data('status');
-            var panorama = $(this).data('panorama'); // Get panorama path
+            // Fill edit modal with hall data
+            $('.edit-hall').click(function() {
+                var id = $(this).data('id');
+                var name = $(this).data('name');
+                var type = $(this).data('type');
+                var seats = $(this).data('seats');
+                var status = $(this).data('status');
+                var panorama = $(this).data('panorama'); // Get panorama path
 
-            $('#edit_hallId').val(id);
-            $('#edit_hallName').val(name);
-            $('#edit_hallType').val(type);
-            $('#edit_totalSeats').val(seats);
-            $('#edit_hallStatus').val(status);
-            $('#current_hall_panorama_img').val(panorama); // Set current panorama path in hidden field
+                $('#edit_hallId').val(id);
+                $('#edit_hallName').val(name);
+                $('#edit_hallType').val(type);
+                $('#edit_totalSeats').val(seats);
+                $('#edit_hallStatus').val(status);
+                $('#current_hall_panorama_img').val(panorama); // Set current panorama path in hidden field
 
-            var editPreview = document.getElementById('editHallPanoramaPreview');
-            if (panorama) {
-                editPreview.src = '../' + panorama; // Adjust path for display
-                editPreview.style.display = 'block';
-            } else {
-                editPreview.style.display = 'none';
-                editPreview.src = '#';
-            }
-        });
-    </script>
-</body>
-</html>
+                var editPreview = document.getElementById('editHallPanoramaPreview');
+                if (panorama) {
+                    editPreview.src = '../' + panorama; // Adjust path for display
+                    editPreview.style.display = 'block';
+                } else {
+                    editPreview.style.display = 'none';
+                    editPreview.src = '#';
+                }
+            });
+        </script>
+    </body>
+    </html>

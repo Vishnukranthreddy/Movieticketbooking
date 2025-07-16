@@ -9,20 +9,15 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 $schedule = null;
@@ -36,8 +31,8 @@ $successMessage = ''; // For potential messages after form submission
 if (isset($_GET['schedule_id']) && is_numeric($_GET['schedule_id'])) {
     $scheduleId = $_GET['schedule_id'];
 
-    // Fetch schedule, movie, hall, and theater details using prepared statement
-    $query = "
+    // Fetch schedule, movie, hall, and theater details
+    $stmt = $conn->prepare("
         SELECT ms.scheduleID, ms.showDate, ms.showTime, ms.price,
                m.movieID, m.movieTitle, m.movieImg, m.movieGenre, m.movieDuration,
                h.hallID, h.hallName, h.hallType, h.totalSeats,
@@ -46,61 +41,55 @@ if (isset($_GET['schedule_id']) && is_numeric($_GET['schedule_id'])) {
         JOIN movietable m ON ms.movieID = m.movieID
         JOIN theater_halls h ON ms.hallID = h.hallID
         JOIN theaters t ON h.theaterID = t.theaterID
-        WHERE ms.scheduleID = $1
-    ";
-    
-    $result = pg_query_params($conn, $query, array($scheduleId));
-
-    if ($result) {
-        if (pg_num_rows($result) > 0) {
-            $data = pg_fetch_assoc($result);
-            // Note: PostgreSQL column names are typically lowercase by default
-            $schedule = [
-                'scheduleID' => $data['scheduleid'],
-                'showDate' => $data['showdate'],
-                'showTime' => $data['showtime'],
-                'price' => $data['price']
-            ];
-            $movie = [
-                'movieID' => $data['movieid'],
-                'movieTitle' => $data['movietitle'],
-                'movieImg' => $data['movieimg'],
-                'movieGenre' => $data['moviegenre'],
-                'movieDuration' => $data['movieduration']
-            ];
-            $hall = [
-                'hallID' => $data['hallid'],
-                'hallName' => $data['hallname'],
-                'hallType' => $data['halltype'],
-                'totalSeats' => $data['totalseats']
-            ];
-            $theater = [
-                'theaterName' => $data['theatername'],
-                'theaterAddress' => $data['theateraddress'],
-                'theaterCity' => $data['theatercity']
-            ];
-        } else {
-            $errorMessage = "Schedule not found.";
-        }
+        WHERE ms.scheduleID = ?
+    ");
+    $stmt->bind_param("i", $scheduleId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result->num_rows > 0) {
+        $data = $result->fetch_assoc();
+        $schedule = [
+            'scheduleID' => $data['scheduleID'],
+            'showDate' => $data['showDate'],
+            'showTime' => $data['showTime'],
+            'price' => $data['price']
+        ];
+        $movie = [
+            'movieID' => $data['movieID'],
+            'movieTitle' => $data['movieTitle'],
+            'movieImg' => $data['movieImg'],
+            'movieGenre' => $data['movieGenre'],
+            'movieDuration' => $data['movieDuration']
+        ];
+        $hall = [
+            'hallID' => $data['hallID'],
+            'hallName' => $data['hallName'],
+            'hallType' => $data['hallType'],
+            'totalSeats' => $data['totalSeats']
+        ];
+        $theater = [
+            'theaterName' => $data['theaterName'],
+            'theaterAddress' => $data['theaterAddress'],
+            'theaterCity' => $data['theaterCity']
+        ];
     } else {
-        $errorMessage = "Error fetching schedule details: " . pg_last_error($conn);
+        $errorMessage = "Schedule not found.";
     }
+    $stmt->close();
 
     // Fetch already booked seats for this schedule
     if ($schedule) {
-        $queryBookedSeats = "SELECT seats FROM bookingtable WHERE scheduleID = $1";
-        $resultBookedSeats = pg_query_params($conn, $queryBookedSeats, array($scheduleId));
-        
-        if ($resultBookedSeats) {
-            while ($row = pg_fetch_assoc($resultBookedSeats)) {
-                if (!empty($row['seats'])) {
-                    // Merge individual seat numbers from comma-separated strings
-                    $bookedSeats = array_merge($bookedSeats, explode(',', $row['seats']));
-                }
+        $stmt = $conn->prepare("SELECT seats FROM bookingtable WHERE scheduleID = ?");
+        $stmt->bind_param("i", $scheduleId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($row = $result->fetch_assoc()) {
+            if (!empty($row['seats'])) {
+                // Merge individual seat numbers from comma-separated strings
+                $bookedSeats = array_merge($bookedSeats, explode(',', $row['seats']));
             }
-        } else {
-            error_log("Error fetching booked seats: " . pg_last_error($conn));
         }
+        $stmt->close();
     }
 
 } else {
@@ -143,8 +132,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['book_tickets'])) {
     }
 }
 
-// Close PostgreSQL connection
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>

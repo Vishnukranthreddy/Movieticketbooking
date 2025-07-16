@@ -30,191 +30,195 @@ $errorMessage = '';
 $successMessage = '';
 
 if ($theaterId > 0) {
-    // Fetch theater name
-    $stmtTheaterQuery = "SELECT \"theaterName\" FROM theaters WHERE \"theaterID\" = $1";
+    // Fetch theater name - using lowercase quoted column name
+    $stmtTheaterQuery = "SELECT \"theatername\" FROM theaters WHERE \"theaterid\" = $1";
     $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
     if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
         $rowTheater = pg_fetch_assoc($stmtTheaterResult);
-        $theaterName = $rowTheater['theaterName'];
+        $theaterName = $rowTheater['theatername'];
     } else {
         $errorMessage = "Theater not found for ID: " . $theaterId;
-        $theaterId = 0; // Invalidate if not found
+        $theaterId = 0; // Invalidate theaterId if not found
     }
 
-    // Only proceed if theaterId is still valid after fetching its name
-    if ($theaterId > 0) {
-        // Handle hall deletion
-        if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
-            $hallId = $_GET['delete_hall'];
+    // Handle hall deletion
+    if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
+        $hallId = $_GET['delete_hall'];
 
-            // Check for dependencies (schedules) before deleting hall
-            $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallID\" = $1";
-            $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
-            $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
+        // Check for dependencies (schedules) before deleting hall - using lowercase quoted column name
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallid\" = $1";
+        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
-            if ($schedulesCount > 0) {
-                $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
-            } else {
-                // Get hall panorama image path before deletion to remove the file
-                $stmtImgQuery = "SELECT \"hallPanoramaImg\" FROM theater_halls WHERE \"hallID\" = $1";
-                $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
-                $hallPanoramaImgPath = null;
-                if ($stmtImgResult && pg_num_rows($stmtImgResult) > 0) {
-                    $row = pg_fetch_assoc($stmtImgResult);
-                    $hallPanoramaImgPath = $row['hallPanoramaImg'];
-                }
-
-                $deleteHallQuery = "DELETE FROM theater_halls WHERE \"hallID\" = $1 AND \"theaterID\" = $2";
-                $deleteHallResult = pg_query_params($conn, $deleteHallQuery, array($hallId, $theaterId));
-                
-                if ($deleteHallResult) {
-                    $successMessage = "Hall deleted successfully!";
-                    // Delete the associated image file if it exists and is a valid path
-                    if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from theater_manager/ to project root
-                        // Ensure the path is within the expected img/panoramas directory to prevent directory traversal
-                        if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
-                            unlink("../" . $hallPanoramaImgPath);
-                        }
-                    }
-                } else {
-                    $errorMessage = "Error deleting hall: " . pg_last_error($conn);
-                }
+        if ($schedulesCount > 0) {
+            $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
+        } else {
+            // Get hall panorama image path before deletion to remove the file - using corrected lowercase quoted column name
+            $stmtImgQuery = "SELECT \"hallpanoramaimg\" FROM theater_halls WHERE \"hallid\" = $1";
+            $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
+            $hallPanoramaImgPath = null;
+            if ($row = pg_fetch_assoc($stmtImgResult)) {
+                $hallPanoramaImgPath = $row['hallpanoramaimg'];
             }
-        }
 
-        // Handle hall addition
-        if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_hall'])) {
-            $hallName = $_POST['hallName'];
-            $hallType = $_POST['hallType'];
-            $totalSeats = (int)$_POST['totalSeats'];
-            $hallStatus = $_POST['hallStatus'];
+            // Delete hall - using lowercase quoted column names
+            $deleteHallQuery = "DELETE FROM theater_halls WHERE \"hallid\" = $1 AND \"theaterid\" = $2";
+            $deleteHallResult = pg_query_params($conn, $deleteHallQuery, array($hallId, $theaterId));
             
-            $hallPanoramaImg = null;
-            $uploadOk = 1;
-
-            // Handle panorama image upload if provided
-            if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                $targetDir = "../img/panoramas/"; // Path relative to theater_manager/ folder
-                if (!is_dir($targetDir)) {
-                    mkdir($targetDir, 0755, true);
-                }
-
-                $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
-                $uniqueFileName = uniqid() . "_" . $fileName;
-                $targetFilePath = $targetDir . $uniqueFileName;
-                $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
-                
-                $check = @getimagesize($_FILES["hallPanoramaImage"]["tmp_name"]);
-                if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
-                if($_FILES["hallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; }
-                if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
-
-                if ($uploadOk == 0) {
-                    // Error message already set
-                } else {
-                    if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
-                        $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
-                    } else {
-                        $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
-                        $uploadOk = 0;
+            if ($deleteHallResult) {
+                $successMessage = "Hall deleted successfully!";
+                // Delete the associated image file if it exists
+                if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from user/ to project root
+                    if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
+                        unlink("../" . $hallPanoramaImgPath);
                     }
                 }
-            } else if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
-                $errorMessage = "File upload error for panorama: " . $_FILES["hallPanoramaImage"]["error"];
-                $uploadOk = 0;
+            } else {
+                $errorMessage = "Error deleting hall: " . pg_last_error($conn);
+            }
+        }
+    }
+
+    // Handle hall addition
+    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_hall'])) {
+        $hallName = $_POST['hallName'];
+        $hallType = $_POST['hallType'];
+        $totalSeats = $_POST['totalSeats'];
+        $hallStatus = $_POST['hallStatus'];
+        
+        $hallPanoramaImg = null; // Initialize to null
+        $uploadOk = 1; // Flag for panorama image upload status
+
+        // Handle panorama image upload if provided
+        if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+            $targetDir = "../img/panoramas/"; // Path relative to theater_manager/ folder
+            if (!is_dir($targetDir)) {
+                mkdir($targetDir, 0755, true);
             }
 
-            if ($uploadOk !== 0) {
-                $addHallQuery = "INSERT INTO theater_halls (\"theaterID\", \"hallName\", \"hallType\", \"totalSeats\", \"hallStatus\", \"hallPanoramaImg\") VALUES ($1, $2, $3, $4, $5, $6)";
-                $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
-                
-                if ($addHallResult) {
-                    $successMessage = "Hall added successfully!";
+            $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
+            $uniqueFileName = uniqid() . "_" . $fileName;
+            $targetFilePath = $targetDir . $uniqueFileName;
+            $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+            
+            $check = @getimagesize($_FILES["hallPanoramaImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
+            if($_FILES["hallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; }
+            if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
+
+            if ($uploadOk == 0) {
+                // Error message already set
+            } else {
+                if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                    $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
                 } else {
-                    $errorMessage = "Error adding hall to database: " . pg_last_error($conn);
-                    // Clean up uploaded file on DB error
-                    if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
-                        unlink("../" . $hallPanoramaImg);
-                    }
+                    $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
+                    $uploadOk = 0;
+                }
+            }
+        } else if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+            $errorMessage = "File upload error for panorama: " . $_FILES["hallPanoramaImage"]["error"];
+            $uploadOk = 0;
+        }
+
+        if ($uploadOk !== 0) {
+            // Add hall - using corrected lowercase quoted column name
+            $addHallQuery = "INSERT INTO theater_halls (\"theaterid\", \"hallname\", \"halltype\", \"totalseats\", \"hallstatus\", \"hallpanoramaimg\") VALUES ($1, $2, $3, $4, $5, $6)";
+            $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
+            
+            if ($addHallResult) {
+                $successMessage = "Hall added successfully!";
+            } else {
+                $errorMessage = "Error adding hall to database: " . pg_last_error($conn);
+                if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
+                    unlink("../" . $hallPanoramaImg); // Clean up uploaded file on DB error
                 }
             }
         }
+    }
 
-        // Handle hall update
-        if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_hall'])) {
-            $hallIdToUpdate = $_POST['edit_hallId'];
-            $hallName = $_POST['edit_hallName'];
-            $hallType = $_POST['edit_hallType'];
-            $totalSeats = (int)$_POST['edit_totalSeats'];
-            $hallStatus = $_POST['edit_hallStatus'];
+    // Handle hall update
+    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_hall'])) {
+        $hallIdToUpdate = $_POST['edit_hallId'];
+        $hallName = $_POST['edit_hallName'];
+        $hallType = $_POST['edit_hallType'];
+        $totalSeats = $_POST['edit_totalSeats'];
+        $hallStatus = $_POST['edit_hallStatus'];
 
-            $currentHallPanoramaImg = $_POST['current_hall_panorama_img'] ?? null;
-            $newHallPanoramaImg = $currentHallPanoramaImg;
-            $uploadOk = 1;
+        $currentHallPanoramaImg = $_POST['current_hall_panorama_img'] ?? null; // Get existing path
+        $newHallPanoramaImg = $currentHallPanoramaImg; // Assume current image by default
+        $uploadOk = 1;
 
-            // Handle new panorama image upload for update
-            if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-                $targetDir = "../img/panoramas/";
-                if (!is_dir($targetDir)) { mkdir($targetDir, 0755, true); }
-                $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
-                $uniqueFileName = uniqid() . "_" . $fileName;
-                $targetFilePath = $targetDir . $uniqueFileName;
-                $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+        // Handle new panorama image upload for update
+        if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+            $targetDir = "../img/panoramas/";
+            if (!is_dir($targetDir)) { mkdir($targetDir, 0755, true); }
+            $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
+            $uniqueFileName = uniqid() . "_" . $fileName;
+            $targetFilePath = $targetDir . $uniqueFileName;
+            $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
 
-                $check = @getimagesize($_FILES["editHallPanoramaImage"]["tmp_name"]);
-                if($check === false) { $errorMessage = "New panorama file is not a valid image."; $uploadOk = 0; }
-                if($_FILES["editHallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, new panorama file is too large (max 15MB)."; $uploadOk = 0; }
-                if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for new panoramas."; $uploadOk = 0; }
+            $check = @getimagesize($_FILES["editHallPanoramaImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "New panorama file is not a valid image."; $uploadOk = 0; }
+            if($_FILES["editHallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, new panorama file is too large (max 15MB)."; $uploadOk = 0; }
+            if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for new panoramas."; $uploadOk = 0; }
 
-                if ($uploadOk == 0) {
-                    // Error already set
-                } else {
-                    if (move_uploaded_file($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
-                        $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
-                        // Delete old panorama file if different and exists
-                        if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
-                            if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
-                                unlink("../" . $currentHallPanoramaImg);
-                            }
+            if ($uploadOk == 0) {
+                // Error already set
+            } else {
+                if (move_uploaded_file($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                    $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
+                    // Delete old panorama file if different and exists
+                    if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
+                        if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
+                            unlink("../" . $currentHallPanoramaImg);
                         }
-                    } else {
-                        $errorMessage = "Error uploading new panorama file for update.";
-                        $uploadOk = 0;
                     }
-                }
-            } else if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
-                $errorMessage = "File upload error for new panorama: " . $_FILES["editHallPanoramaImage"]["error"];
-                $uploadOk = 0;
-            }
-
-            if ($uploadOk !== 0) {
-                $updateHallQuery = "UPDATE theater_halls SET \"hallName\" = $1, \"hallType\" = $2, \"totalSeats\" = $3, \"hallStatus\" = $4, \"hallPanoramaImg\" = $5 WHERE \"hallID\" = $6 AND \"theaterID\" = $7";
-                $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
-                
-                if ($updateHallResult) {
-                    $successMessage = "Hall updated successfully!";
                 } else {
-                    $errorMessage = "Error updating hall in database: " . pg_last_error($conn);
-                    if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
-                        unlink("../" . $newHallPanoramaImg); // Clean up newly uploaded file on DB error
-                    }
+                    $errorMessage = "Error uploading new panorama file for update.";
+                    $uploadOk = 0;
+                }
+            }
+        } else if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+            $errorMessage = "File upload error for new panorama: " . $_FILES["editHallPanoramaImage"]["error"];
+            $uploadOk = 0;
+        }
+
+        if ($uploadOk !== 0) {
+            // Update hall - using corrected lowercase quoted column name
+            $updateHallQuery = "UPDATE theater_halls SET \"hallname\" = $1, \"halltype\" = $2, \"totalseats\" = $3, \"hallstatus\" = $4, \"hallpanoramaimg\" = $5 WHERE \"hallid\" = $6 AND \"theaterid\" = $7";
+            $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
+            
+            if ($updateHallResult) {
+                $successMessage = "Hall updated successfully!";
+            } else {
+                $errorMessage = "Error updating hall in database: " . pg_last_error($conn);
+                // If DB update fails, consider deleting the newly uploaded panorama file to clean up
+                if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
+                    unlink("../" . $newHallPanoramaImg);
                 }
             }
         }
+    }
 
-        // Get all halls for this theater (re-fetch after any add/delete/update operation)
-        $hallsQuery = "SELECT * FROM theater_halls WHERE \"theaterID\" = $1 ORDER BY \"hallName\"";
+
+    // Get all halls for this theater - using lowercase quoted column name for ORDER BY
+    // Re-fetch after any add/delete/update operation
+    if ($theaterId > 0) {
+        $hallsQuery = "SELECT * FROM theater_halls WHERE \"theaterid\" = $1 ORDER BY \"hallname\"";
         $halls = pg_query_params($conn, $hallsQuery, array($theaterId));
         if (!$halls) {
             $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to fetch halls: " . pg_last_error($conn);
             $halls = null;
         }
-
-    } else { // theaterId is 0 or invalid
-        $errorMessage = "No valid theater ID provided. Please select a theater from the Theaters list to manage its halls.";
-        $halls = null;
+    } else {
+        $halls = null; // No halls if theaterId is invalid
     }
-} // Close the main if ($theaterId > 0) block
+
+} else {
+    $errorMessage = "No theater ID provided. Please select a theater from the Theaters list to manage its halls.";
+    $halls = null;
+}
 
 pg_close($conn);
 ?>
@@ -227,7 +231,7 @@ pg_close($conn);
     <title>Manage Halls for <?php echo htmlspecialchars($theaterName); ?> - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -352,7 +356,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../admin/logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -498,38 +502,38 @@ pg_close($conn);
                                 <tbody>
                                     <?php while ($hall = pg_fetch_assoc($halls)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($hall['hallID']); ?></td>
-                                            <td><?php echo htmlspecialchars($hall['hallName']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallid']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallname']); ?></td>
                                             <td>
-                                                <span class="hall-type-badge <?php echo htmlspecialchars($hall['hallType']); ?>">
-                                                    <?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['hallType']))); ?>
+                                                <span class="hall-type-badge <?php echo htmlspecialchars($hall['halltype']); ?>">
+                                                    <?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['halltype']))); ?>
                                                 </span>
                                             </td>
-                                            <td><?php echo htmlspecialchars($hall['totalSeats']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['totalseats']); ?></td>
                                             <td>
-                                                <?php if (!empty($hall['hallPanoramaImg'])): ?>
-                                                    <img src="../<?php echo htmlspecialchars($hall['hallPanoramaImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x50/cccccc/333333?text=N/A';" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
+                                                <?php if (!empty($hall['hallpanoramaimg'])): ?>
+                                                    <img src="../<?php echo htmlspecialchars($hall['hallpanoramaimg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
                                                 <?php else: ?>
                                                     N/A
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <span class="status-badge <?php echo $hall['hallStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($hall['hallStatus'])); ?>
+                                                <span class="status-badge <?php echo $hall['hallstatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($hall['hallstatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
                                                 <button type="button" class="btn btn-sm btn-warning edit-hall" 
-                                                        data-id="<?php echo htmlspecialchars($hall['hallID']); ?>"
-                                                        data-name="<?php echo htmlspecialchars($hall['hallName']); ?>"
-                                                        data-type="<?php echo htmlspecialchars($hall['hallType']); ?>"
-                                                        data-seats="<?php echo htmlspecialchars($hall['totalSeats']); ?>"
-                                                        data-status="<?php echo htmlspecialchars($hall['hallStatus']); ?>"
-                                                        data-panorama="<?php echo htmlspecialchars($hall['hallPanoramaImg'] ?? ''); ?>"
+                                                        data-id="<?php echo htmlspecialchars($hall['hallid']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($hall['hallname']); ?>"
+                                                        data-type="<?php echo htmlspecialchars($hall['halltype']); ?>"
+                                                        data-seats="<?php echo htmlspecialchars($hall['totalseats']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($hall['hallstatus']); ?>"
+                                                        data-panorama="<?php echo htmlspecialchars($hall['hallpanoramaimg'] ?? ''); ?>"
                                                         data-toggle="modal" data-target="#editHallModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
-                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete_hall=<?php echo htmlspecialchars($hall['hallID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete associated schedules and bookings!')">
+                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete_hall=<?php echo htmlspecialchars($hall['hallid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete associated schedules and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>

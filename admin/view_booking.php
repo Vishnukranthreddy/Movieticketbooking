@@ -1,9 +1,9 @@
 <?php
 session_start();
 
-// Check if user is logged in as admin
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: index.php");
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -36,15 +36,15 @@ $payment = null;
 
 // Get comprehensive booking details by joining all relevant tables
 $bookingQuery = "
-    SELECT b.*, m.\"movieTitle\", m.\"movieImg\", m.\"movieGenre\", m.\"movieDuration\",
-           ms.\"showDate\", ms.\"showTime\", ms.price as ticketPricePerUnit,
-           h.\"hallName\", h.\"hallType\", t.\"theaterName\", t.\"theaterAddress\", t.\"theaterCity\"
+    SELECT b.*, m.movietitle, m.movieimg, m.moviegenre, m.movieduration,
+           ms.showdate, ms.showtime, ms.price as ticketpriceperunit,
+           h.hallname, h.halltype, t.theatername, t.theateraddress, t.theatercity
     FROM bookingtable b
-    LEFT JOIN movietable m ON b.\"movieID\" = m.\"movieID\"
-    LEFT JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
-    LEFT JOIN theater_halls h ON b.\"hallID\" = h.\"hallID\"
-    LEFT JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
-    WHERE b.\"bookingID\" = $1
+    LEFT JOIN movietable m ON b.movieid = m.movieid
+    LEFT JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
+    LEFT JOIN theater_halls h ON b.hallid = h.hallid
+    LEFT JOIN theaters t ON h.theaterid = t.theaterid
+    WHERE b.bookingid = $1
 ";
 $bookingResult = pg_query_params($conn, $bookingQuery, array($bookingID));
 
@@ -58,9 +58,9 @@ $booking = pg_fetch_assoc($bookingResult);
 $booking = array_change_key_case($booking, CASE_LOWER);
 
 // Get payment details if available
-$paymentQuery = "SELECT * FROM payment WHERE \"ORDERID\" = $1";
+$paymentQuery = "SELECT * FROM payment WHERE orderid = $1";
 $paymentResult = pg_query_params($conn, $paymentQuery, array($booking['orderid']));
-$payment = $paymentResult && pg_num_rows($paymentResult) > 0 ? pg_fetch_assoc($paymentResult) : null;
+$payment = pg_num_rows($paymentResult) > 0 ? pg_fetch_assoc($paymentResult) : null;
 if ($payment) {
     $payment = array_change_key_case($payment, CASE_LOWER);
 }
@@ -292,7 +292,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="logout.php">Sign out</a>
+                <a class="btn btn-signout" href="../admin/logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -302,16 +302,13 @@ pg_close($conn);
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
                             </a>
                         </li>
                         <li class="nav-item">
@@ -333,23 +330,55 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link active" href="bookings.php">
+                            <a class="nav-link" href="bookings.php">
                                 <i class="fas fa-ticket-alt"></i>
                                 Bookings
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="users.php">
+                            <a class="nav-link active" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
                                 Users
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
+                            <a class="nav-link" href="../admin/settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -358,15 +387,16 @@ pg_close($conn);
                 <div class="admin-header">
                     <h1>Booking Details</h1>
                     <div class="admin-user-info">
-                        <img src="https://via.placeholder.com/40" alt="Admin">
+                        <img src="https://placehold.co/40x40/cccccc/333333?text=Admin" alt="Admin">
                         <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
                     </div>
                 </div>
 
                 <div class="booking-container">
+                    <?php if ($booking): ?>
                     <div class="movie-details-section">
                         <?php if (!empty($booking['movieimg'])): ?>
-                            <img src="../<?php echo htmlspecialchars($booking['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/120x180/cccccc/333333?text=No+Image';" alt="<?php echo htmlspecialchars($booking['movietitle'] ?? 'Movie Poster'); ?>" class="movie-poster">
+                            <img src="../../<?php echo htmlspecialchars($booking['movieimg']); ?>" alt="<?php echo htmlspecialchars($booking['movietitle'] ?? 'Movie Poster'); ?>" class="movie-poster">
                         <?php else: ?>
                             <img src="https://placehold.co/120x180/cccccc/333333?text=No+Image" alt="No Movie Poster" class="movie-poster">
                         <?php endif; ?>
@@ -512,6 +542,11 @@ pg_close($conn);
                         </button>
                     </div>
                 </div>
+                <?php else: ?>
+                    <div class="alert alert-info text-center">
+                        Booking details not found or invalid ID.
+                    </div>
+                <?php endif; ?>
             </main>
         </div>
     </div>

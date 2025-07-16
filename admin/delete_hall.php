@@ -29,28 +29,29 @@ $redirectUrl = "theater_halls.php?theater_id=" . $theaterId; // Default redirect
 
 if ($hallId > 0 && $theaterId > 0) {
     // Check for dependencies (schedules) before deleting hall
-    $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallID\" = $1";
+    $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE hallid = $1";
     $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
     
     if (!$checkSchedulesResult) {
-        die("Error checking schedules: " . pg_last_error($conn));
-    }
-    
-    $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
-
-    if ($schedulesCount > 0) {
-        $errorMessage = "Cannot delete hall. It has " . $schedulesCount . " schedule(s) associated. Please delete all associated schedules first.";
+        $errorMessage = "Database error checking schedules: " . pg_last_error($conn);
         $redirectUrl .= "&error=" . urlencode($errorMessage);
     } else {
-        // Delete the hall
-        $deleteQuery = "DELETE FROM theater_halls WHERE \"hallID\" = $1";
-        $deleteResult = pg_query_params($conn, $deleteQuery, array($hallId));
-        
-        if ($deleteResult) {
-            $redirectUrl .= "&success=Hall deleted successfully!";
-        } else {
-            $errorMessage = "Error deleting hall: " . pg_last_error($conn);
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
+
+        if ($schedulesCount > 0) {
+            $errorMessage = "Cannot delete hall. It has " . $schedulesCount . " schedule(s) associated. Please delete all associated schedules first.";
             $redirectUrl .= "&error=" . urlencode($errorMessage);
+        } else {
+            // Delete the hall
+            $deleteQuery = "DELETE FROM theater_halls WHERE hallid = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($hallId));
+            
+            if ($deleteResult) {
+                $redirectUrl .= "&success=Hall deleted successfully!";
+            } else {
+                $errorMessage = "Error deleting hall: " . pg_last_error($conn);
+                $redirectUrl .= "&error=" . urlencode($errorMessage);
+            }
         }
     }
 } else {

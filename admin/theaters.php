@@ -30,21 +30,22 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $theaterId = $_GET['delete'];
     
     // Check if the theater exists
-    $checkQuery = "SELECT \"theaterID\" FROM theaters WHERE \"theaterID\" = $1";
+    $checkQuery = "SELECT theaterid FROM theaters WHERE theaterid = $1";
     $checkResult = pg_query_params($conn, $checkQuery, array($theaterId));
     
     if ($checkResult && pg_num_rows($checkResult) > 0) {
+        // IMPORTANT: Check for foreign key dependencies before deleting!
         // Check if theater has associated halls. If halls have schedules/bookings,
-        // those would also need to be handled, ideally via ON DELETE CASCADE or explicit deletion.
-        $checkHallsQuery = "SELECT COUNT(*) as count FROM theater_halls WHERE \"theaterID\" = $1";
+        // those would typically cascade or need prior deletion.
+        $checkHallsQuery = "SELECT COUNT(*) as count FROM theater_halls WHERE theaterid = $1";
         $checkHallsResult = pg_query_params($conn, $checkHallsQuery, array($theaterId));
         $hallsCount = pg_fetch_assoc($checkHallsResult)['count'];
 
         if ($hallsCount > 0) {
-            $errorMessage = "Cannot delete theater. It has " . $hallsCount . " hall(s) associated. Delete halls first.";
+            $errorMessage = "Cannot delete theater. It has " . $hallsCount . " hall(s) associated. Please delete all associated halls first (or implement cascade delete on halls/schedules/bookings).";
         } else {
             // Delete the theater
-            $deleteQuery = "DELETE FROM theaters WHERE \"theaterID\" = $1";
+            $deleteQuery = "DELETE FROM theaters WHERE theaterid = $1";
             $deleteResult = pg_query_params($conn, $deleteQuery, array($theaterId));
             
             if ($deleteResult) {
@@ -71,8 +72,7 @@ $param_index = 1;
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    // Using ILIKE for case-insensitive search in PostgreSQL
-    $searchCondition = "WHERE \"theaterName\" ILIKE $" . ($param_index++) . " OR \"theaterCity\" ILIKE $" . ($param_index++) . " OR \"theaterState\" ILIKE $" . ($param_index++) . "";
+    $searchCondition = "WHERE theatername ILIKE $" . ($param_index++) . " OR theatercity ILIKE $" . ($param_index++) . " OR theaterstate ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam, $searchParam];
 }
 
@@ -87,7 +87,7 @@ $totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get theaters for current page
-$query = "SELECT * FROM theaters " . $searchCondition . " ORDER BY \"theaterID\" DESC LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
+$query = "SELECT * FROM theaters " . $searchCondition . " ORDER BY theaterid DESC LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
 $query_params = array_merge($params, [$recordsPerPage, $offset]);
 $theaters = pg_query_params($conn, $query, $query_params);
@@ -107,7 +107,7 @@ pg_close($conn);
     <title>Manage Theaters - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -218,7 +218,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../admin/logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a> <!-- Corrected path -->
             </li>
         </ul>
     </nav>
@@ -228,16 +228,13 @@ pg_close($conn);
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../content_manager/movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
                             </a>
                         </li>
                         <li class="nav-item">
@@ -264,7 +261,22 @@ pg_close($conn);
                                 Bookings
                             </a>
                         </li>
-                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees Users, Reports, Settings in Theater Manager sidebar ?>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Reports
+                            </a>
+                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
+                            </a>
+                        </li>
                         <li class="nav-item">
                             <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
@@ -272,15 +284,18 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../admin/reports.php">
-                                <i class="fas fa-chart-bar"></i>
-                                All Reports
-                            </a>
-                        </li>
-                        <li class="nav-item">
                             <a class="nav-link" href="../admin/settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
                             </a>
                         </li>
                         <?php endif; ?>
@@ -351,25 +366,25 @@ pg_close($conn);
                                 <?php if (pg_num_rows($theaters) > 0): ?>
                                     <?php while ($theater = pg_fetch_assoc($theaters)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($theater['theaterID']); ?></td>
-                                            <td><?php echo htmlspecialchars($theater['theaterName']); ?></td>
-                                            <td><?php echo htmlspecialchars($theater['theaterCity']); ?></td>
-                                            <td><?php echo htmlspecialchars($theater['theaterState']); ?></td>
-                                            <td><?php echo htmlspecialchars($theater['theaterPhone']); ?></td>
-                                            <td><?php echo htmlspecialchars($theater['theaterEmail']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterid']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theatername']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theatercity']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterstate']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theaterphone']); ?></td>
+                                            <td><?php echo htmlspecialchars($theater['theateremail']); ?></td>
                                             <td>
-                                                <span class="status-badge <?php echo $theater['theaterStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($theater['theaterStatus'])); ?>
+                                                <span class="status-badge <?php echo $theater['theaterstatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($theater['theaterstatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_theater.php?id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_theater.php?id=<?php echo htmlspecialchars($theater['theaterid']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="theaters.php?delete=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this theater? This will also delete associated halls, schedules, and bookings!')">
+                                                <a href="delete_theater.php?id=<?php echo htmlspecialchars($theater['theaterid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this theater? This will also delete associated halls, schedules, and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
-                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn btn-sm btn-info" title="Manage Halls">
+                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theater['theaterid']); ?>" class="btn btn-sm btn-info" title="Manage Halls">
                                                     <i class="fas fa-door-open"></i>
                                                 </a>
                                             </td>

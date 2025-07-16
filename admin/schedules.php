@@ -66,7 +66,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $price = $_POST['price'];
     $status = $_POST['status'];
     
-    $insertQuery = "INSERT INTO movie_schedules (\"movieID\", \"hallID\", \"showDate\", \"showTime\", price, \"scheduleStatus\") VALUES ($1, $2, $3, $4, $5, $6)";
+    // Note: movieID and hallID are foreign keys, ensure they are correctly referenced
+    $insertQuery = "INSERT INTO movie_schedules (movieid, hallid, showdate, showtime, price, schedulestatus) VALUES ($1, $2, $3, $4, $5, $6)";
     $insertResult = pg_query_params($conn, $insertQuery, array($movieId, $hallId, $showDate, $showTime, $price, $status));
     
     if ($insertResult) {
@@ -77,19 +78,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
 }
 
 // Get all movies for dropdown
-$moviesQuery = "SELECT \"movieID\", \"movieTitle\" FROM movietable ORDER BY \"movieTitle\"";
+// Changed "movieID" to "movieid" and "movieTitle" to "movietitle" based on the error hint
+$moviesQuery = "SELECT movieid, movietitle FROM movietable ORDER BY movietitle";
 $movies = pg_query($conn, $moviesQuery);
 if (!$movies) {
     die("Error fetching movies: " . pg_last_error($conn));
 }
 
 // Get all theater halls for dropdown
+// Changed "theaterID" to "theaterid" based on the new error hint
 $hallsQuery = "
-    SELECT h.\"hallID\", h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
+    SELECT h.hallid, h.hallname, h.halltype, t.theatername 
     FROM theater_halls h
-    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
-    WHERE h.\"hallStatus\" = 'active'
-    ORDER BY t.\"theaterName\", h.\"hallName\"
+    JOIN theaters t ON h.theaterid = t.theaterid 
+    WHERE h.hallstatus = 'active'
+    ORDER BY t.theatername, h.hallname
 ";
 $halls = pg_query($conn, $hallsQuery);
 if (!$halls) {
@@ -109,18 +112,20 @@ $param_index = 1;
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    $searchCondition = "WHERE m.\"movieTitle\" ILIKE $" . ($param_index++) . " OR t.\"theaterName\" ILIKE $" . ($param_index++) . "";
+    // Changed "movieTitle" to "movietitle"
+    $searchCondition = "WHERE m.movietitle ILIKE $" . ($param_index++) . " OR t.\"theaterName\" ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam];
 }
 
 // Count total records for pagination
+// Changed "theaterID" to "theaterid"
 $countQuery = "
     SELECT COUNT(*) as total 
     FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
-    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
-    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
-    " . $searchCondition;
+    JOIN movietable m ON ms.movieid = m.movieid 
+    JOIN theater_halls h ON ms.hallid = h.hallid 
+    JOIN theaters t ON h.theaterid = t.theaterid 
+" . $searchCondition;
 
 $stmtCountResult = pg_query_params($conn, $countQuery, $params);
 if (!$stmtCountResult) {
@@ -130,15 +135,16 @@ $totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get schedules for current page
+// Changed "theaterID" to "theaterid"
 $query = "
-    SELECT ms.*, m.\"movieTitle\", h.\"hallName\", h.\"hallType\", t.\"theaterName\"
-    FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.\"movieID\"
-    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
-    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
-    " . $searchCondition . "
-    ORDER BY ms.\"showDate\" DESC, ms.\"showTime\" DESC
-    LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
+SELECT ms.*, m.movietitle, h.hallname, h.halltype, t.theatername 
+FROM movie_schedules ms
+JOIN movietable m ON ms.movieid = m.movieid 
+JOIN theater_halls h ON ms.hallid = h.hallid 
+JOIN theaters t ON h.theaterid = t.theaterid 
+" . $searchCondition . "
+ORDER BY ms.showdate DESC, ms.showtime DESC
+LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
 $query_params = array_merge($params, [$recordsPerPage, $offset]);
 $schedules = pg_query_params($conn, $query, $query_params);
@@ -431,26 +437,26 @@ pg_close($conn);
                                 <?php if (pg_num_rows($schedules) > 0): ?>
                                     <?php while ($schedule = pg_fetch_assoc($schedules)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['movieTitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['scheduleid']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['movietitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['theatername']); ?></td>
                                             <td>
-                                                <?php echo htmlspecialchars($schedule['hallName']); ?> 
-                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</span>
+                                                <?php echo htmlspecialchars($schedule['hallname']); ?> 
+                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['halltype']))); ?>)</span>
                                             </td>
-                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showDate']))); ?></td>
-                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showTime']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showdate']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showtime']))); ?></td>
                                             <td>₹<?php echo number_format($schedule['price'], 2); ?></td>
                                             <td>
-                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['scheduleStatus']); ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($schedule['scheduleStatus'])); ?>
+                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['schedulestatus']); ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($schedule['schedulestatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleid']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
+                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
@@ -521,8 +527,8 @@ pg_close($conn);
                                     pg_result_seek($movies, 0);
                                 }
                                 while ($movie = pg_fetch_assoc($movies)): ?>
-                                    <option value="<?php echo htmlspecialchars($movie['movieID']); ?>">
-                                        <?php echo htmlspecialchars($movie['movieTitle']); ?>
+                                    <option value="<?php echo htmlspecialchars($movie['movieid']); ?>">
+                                        <?php echo htmlspecialchars($movie['movietitle']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>
@@ -537,8 +543,8 @@ pg_close($conn);
                                     pg_result_seek($halls, 0);
                                 }
                                 while ($hall = pg_fetch_assoc($halls)): ?>
-                                    <option value="<?php echo htmlspecialchars($hall['hallID']); ?>">
-                                        <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
+                                    <option value="<?php echo htmlspecialchars($hall['hallid']); ?>">
+                                        <?php echo htmlspecialchars($hall['theatername'] . ' - ' . $hall['hallname'] . ' (' . str_replace('-', ' ', $hall['halltype']) . ')'); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>

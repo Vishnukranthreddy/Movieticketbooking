@@ -30,7 +30,7 @@ $successMessage = '';
 
 if ($theaterId > 0) {
     // Fetch current theater details
-    $stmtQuery = "SELECT * FROM theaters WHERE \"theaterID\" = $1";
+    $stmtQuery = "SELECT * FROM theaters WHERE theaterid = $1";
     $stmtResult = pg_query_params($conn, $stmtQuery, array($theaterId));
     if ($stmtResult && pg_num_rows($stmtResult) > 0) {
         $theater = pg_fetch_assoc($stmtResult);
@@ -57,13 +57,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_theater'])) {
         $theaterEmail = $_POST['theaterEmail'];
         $theaterStatus = $_POST['theaterStatus'];
 
-        $updateQuery = "UPDATE theaters SET \"theaterName\" = $1, \"theaterAddress\" = $2, \"theaterCity\" = $3, \"theaterState\" = $4, \"theaterZipcode\" = $5, \"theaterPhone\" = $6, \"theaterEmail\" = $7, \"theaterStatus\" = $8 WHERE \"theaterID\" = $9";
+        $updateQuery = "UPDATE theaters SET theatername = $1, theateraddress = $2, theatercity = $3, theaterstate = $4, theaterzipcode = $5, theaterphone = $6, theateremail = $7, theaterstatus = $8 WHERE theaterid = $9";
         $updateResult = pg_query_params($conn, $updateQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterId));
 
         if ($updateResult) {
             $successMessage = "Theater updated successfully!";
             // Refresh theater data after update
-            $stmtQuery = "SELECT * FROM theaters WHERE \"theaterID\" = $1";
+            $stmtQuery = "SELECT * FROM theaters WHERE theaterid = $1";
             $stmtResult = pg_query_params($conn, $stmtQuery, array($theaterId));
             $theater = pg_fetch_assoc($stmtResult); // Update $theater variable with new data
             $theater = array_change_key_case($theater, CASE_LOWER);

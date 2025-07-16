@@ -1,9 +1,9 @@
 <?php
 session_start();
 
-// RBAC: Accessible only by Super Admin (roleID 1)
-if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
-    header("Location: index.php");
+// RBAC: Accessible by Super Admin (roleID 1) and Theater Manager (roleID 2)
+if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 2)) {
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
@@ -42,35 +42,34 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     // Handle panorama image upload if provided
     if (isset($_FILES["theaterPanoramaImage"]) && $_FILES["theaterPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
-        $targetDir = "../img/panoramas/"; // Path relative to admin/ folder
+        $targetDir = "../img/panoramas/"; // Path relative to theater_manager/ folder
         // Ensure target directory exists and is writable
         if (!is_dir($targetDir)) {
             mkdir($targetDir, 0755, true); // Create recursively if needed
         }
 
         $fileName = basename($_FILES["theaterPanoramaImage"]["name"]);
-        $uniqueFileName = uniqid() . "_" . $fileName; // Add unique prefix to prevent overwriting
+        $uniqueFileName = uniqid() . "_" . $fileName; // Add unique prefix
         $targetFilePath = $targetDir . $uniqueFileName;
         $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
         
         // Basic image validation
-        $check = @getimagesize($_FILES["theaterPanoramaImage"]["tmp_name"]); // Use @to suppress warnings for invalid images
+        $check = @getimagesize($_FILES["theaterPanoramaImage"]["tmp_name"]);
         if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
-        if($_FILES["theaterPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; } // Larger size for panoramas
+        if($_FILES["theaterPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; }
         if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
 
         if ($uploadOk == 0) {
-            // Error message already set by validation checks above
+            // Error message already set
         } else {
             if (move_uploaded_file($_FILES["theaterPanoramaImage"]["tmp_name"], $targetFilePath)) {
                 $theaterPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
             } else {
                 $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
-                $uploadOk = 0; // Set uploadOk to 0 if move fails
+                $uploadOk = 0;
             }
         }
     } else if (isset($_FILES["theaterPanoramaImage"]) && $_FILES["theaterPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
-        // Handle other file upload errors (e.g., UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE)
         $errorMessage = "File upload error for panorama: " . $_FILES["theaterPanoramaImage"]["error"];
         $uploadOk = 0;
     }
@@ -78,37 +77,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Only proceed with database insert if panorama upload (if attempted) was successful or no file was selected
     if ($uploadOk !== 0) {
         // Insert theater data using prepared statement
-        $insertQuery = "INSERT INTO theaters (\"theaterName\", \"theaterAddress\", \"theaterCity\", \"theaterState\", \"theaterZipcode\", \"theaterPhone\", \"theaterEmail\", \"theaterStatus\", \"theaterPanoramaImg\") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING \"theaterID\"";
-        $insertResult = pg_query_params($conn, $insertQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg));
+        // Use RETURNING theaterid to get the newly inserted ID
+        // Corrected column name from theaterpanoraimg to theaterpanoramaimg based on likely typo
+        $insertTheaterQuery = "INSERT INTO theaters (theatername, theateraddress, theatercity, theaterstate, theaterzipcode, theaterphone, theateremail, theaterstatus, theaterpanoramaimg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING theaterid";
+        $insertTheaterResult = pg_query_params($conn, $insertTheaterQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg));
         
-        if ($insertResult) {
-            $row = pg_fetch_assoc($insertResult);
-            $theaterId = $row['theaterID']; // Get the ID of the newly inserted theater
+        if ($insertTheaterResult) {
+            $row = pg_fetch_assoc($insertTheaterResult);
+            $theaterId = $row['theaterid']; // Get the ID of the newly inserted theater
             
             // Check if we need to create default halls
             if (isset($_POST['createDefaultHalls']) && $_POST['createDefaultHalls'] == 'yes') {
-                // Prepared statement for hall insertion
-                // Note: We don't have hall panorama upload here as it's for specific halls, not default ones.
-                $hallInsertQuery = "INSERT INTO theater_halls (\"theaterID\", \"hallName\", \"hallType\", \"totalSeats\", \"hallStatus\") VALUES ($1, $2, $3, $4, $5)";
                 $hallStatus = "active";
 
-                // Create Main Hall
-                $hallName = "Main Hall";
-                $hallType = "main-hall";
-                $totalSeats = 120;
-                pg_query_params($conn, $hallInsertQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
+                // Insert into theater_halls using prepared statements
+                // Changed column names to lowercase as PostgreSQL typically stores them unquoted in lowercase
+                $insertHallQuery = "INSERT INTO theater_halls (theaterid, hallname, halltype, totalseats, hallstatus) VALUES ($1, $2, $3, $4, $5)";
                 
-                // Create VIP Hall
-                $hallName = "VIP Hall";
-                $hallType = "vip-hall";
-                $totalSeats = 80;
-                pg_query_params($conn, $hallInsertQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
+                $hallName = "Main Hall"; $hallType = "main-hall"; $totalSeats = 120;
+                pg_query_params($conn, $insertHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
                 
-                // Create Private Hall
-                $hallName = "Private Hall";
-                $hallType = "private-hall";
-                $totalSeats = 40;
-                pg_query_params($conn, $hallInsertQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
+                $hallName = "VIP Hall"; $hallType = "vip-hall"; $totalSeats = 80;
+                pg_query_params($conn, $insertHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
+                
+                $hallName = "Private Hall"; $hallType = "private-hall"; $totalSeats = 40;
+                pg_query_params($conn, $insertHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus));
             }
             
             $successMessage = "Theater added successfully!";
@@ -117,14 +110,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             exit();
         } else {
             $errorMessage = "Error adding theater to database: " . pg_last_error($conn);
-            // If DB insert fails, try to delete the uploaded panorama file to clean up
             if ($theaterPanoramaImg && file_exists("../" . $theaterPanoramaImg)) {
-                unlink("../" . $theaterPanoramaImg);
+                unlink("../" . $theaterPanoramaImg); // Clean up uploaded file on DB error
             }
         }
     }
 }
 
+// Close PostgreSQL connection
 pg_close($conn);
 ?>
 
@@ -136,8 +129,7 @@ pg_close($conn);
     <title>Add New Theater - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
-    <style>
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <style>
         body {
             background-color: #f8f9fa;
             font-family: 'Arial', sans-serif;
@@ -388,7 +380,7 @@ pg_close($conn);
                                     <label for="theaterPanoramaImage">Theater Panorama Image (Optional)</label>
                                     <input type="file" class="form-control-file" id="theaterPanoramaImage" name="theaterPanoramaImage" onchange="previewTheaterPanorama(this)">
                                     <img id="theaterPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
-                                    <small class="form-text text-muted">Upload a 360-degree panorama image for the theater (JPG, PNG).</small>
+                                    <small class="form-text text-muted">Upload a 360-degree panorama image for the theater (JPG, PNG, max 15MB).</small>
                                 </div>
                             </div>
                         </div>

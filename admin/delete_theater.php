@@ -31,38 +31,22 @@ if ($theaterId > 0) {
     // if configured with ON DELETE CASCADE for theater_halls, movie_schedules, and bookingtable.
     // Ensure cascades are set up correctly on all levels (theaters -> halls -> schedules -> bookings).
 
-    // Check for dependencies (halls, schedules, bookings) before deleting theater
-    // This is a more robust check if ON DELETE CASCADE is not fully configured or understood.
-    $hasHallsQuery = "SELECT COUNT(*) as count FROM theater_halls WHERE \"theaterID\" = $1";
-    $hasHallsResult = pg_query_params($conn, $hasHallsQuery, array($theaterId));
-    $hallsCount = pg_fetch_assoc($hasHallsResult)['count'];
-
-    $hasSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules ms JOIN theater_halls th ON ms.\"hallID\" = th.\"hallID\" WHERE th.\"theaterID\" = $1";
-    $hasSchedulesResult = pg_query_params($conn, $hasSchedulesQuery, array($theaterId));
-    $schedulesCount = pg_fetch_assoc($hasSchedulesResult)['count'];
-
-    $hasBookingsQuery = "SELECT COUNT(*) as count FROM bookingtable b JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\" JOIN theater_halls th ON ms.\"hallID\" = th.\"hallID\" WHERE th.\"theaterID\" = $1";
-    $hasBookingsResult = pg_query_params($conn, $hasBookingsQuery, array($theaterId));
-    $bookingsCount = pg_fetch_assoc($hasBookingsResult)['count'];
-
-    if ($hallsCount > 0 || $schedulesCount > 0 || $bookingsCount > 0) {
-        $errorMessage = "Cannot delete theater. It has associated records:";
-        if ($hallsCount > 0) $errorMessage .= " " . $hallsCount . " hall(s),";
-        if ($schedulesCount > 0) $errorMessage .= " " . $schedulesCount . " schedule(s),";
-        if ($bookingsCount > 0) $errorMessage .= " " . $bookingsCount . " booking(s),";
-        $errorMessage = rtrim($errorMessage, ',') . ". Please delete them first.";
-        $redirectUrl .= "?error=" . urlencode($errorMessage);
+    // Delete the theater
+    $deleteQuery = "DELETE FROM theaters WHERE theaterid = $1";
+    $deleteResult = pg_query_params($conn, $deleteQuery, array($theaterId));
+    
+    if ($deleteResult) {
+        // If ON DELETE CASCADE is set up correctly, associated halls, schedules, and bookings
+        // should be deleted automatically.
+        $redirectUrl .= "?success=Theater deleted successfully!";
     } else {
-        // Delete the theater
-        $deleteQuery = "DELETE FROM theaters WHERE \"theaterID\" = $1";
-        $deleteResult = pg_query_params($conn, $deleteQuery, array($theaterId));
-        
-        if ($deleteResult) {
-            $redirectUrl .= "?success=Theater deleted successfully!";
-        } else {
-            $errorMessage = "Error deleting theater: " . pg_last_error($conn);
-            $redirectUrl .= "?error=" . urlencode($errorMessage);
+        // Provide a more specific error if the deletion fails, especially due to FKs
+        $errorMessage = "Error deleting theater: " . pg_last_error($conn);
+        // Check for specific PostgreSQL foreign key violation error message
+        if (strpos(pg_last_error($conn), "foreign key constraint fails") !== false || strpos(pg_last_error($conn), "violates foreign key constraint") !== false) {
+            $errorMessage = "Cannot delete theater. There are still associated halls, schedules, or bookings. Please delete them first or ensure cascading deletes are properly configured in your database schema.";
         }
+        $redirectUrl .= "?error=" . urlencode($errorMessage);
     }
 } else {
     $redirectUrl .= "?error=Invalid theater ID provided for deletion.";

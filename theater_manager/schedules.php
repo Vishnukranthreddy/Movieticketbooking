@@ -88,11 +88,11 @@ if (!$movies) {
 // Get all theater halls for dropdown
 // Changed "theaterID" to "theaterid" based on the new error hint
 $hallsQuery = "
-    SELECT h.\"hallID\", h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
+    SELECT h.hallid, h.hallname, h.halltype, t.theatername 
     FROM theater_halls h
     JOIN theaters t ON h.theaterid = t.theaterid 
-    WHERE h.\"hallStatus\" = 'active'
-    ORDER BY t.\"theaterName\", h.\"hallName\"
+    WHERE h.hallstatus = 'active'
+    ORDER BY t.theatername, h.hallname
 ";
 $halls = pg_query($conn, $hallsQuery);
 if (!$halls) {

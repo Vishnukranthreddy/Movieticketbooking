@@ -86,10 +86,11 @@ if (!$movies) {
 }
 
 // Get all theater halls for dropdown
+// Changed "theaterID" to "theaterid" based on the new error hint
 $hallsQuery = "
     SELECT h.\"hallID\", h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
     FROM theater_halls h
-    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    JOIN theaters t ON h.theaterid = t.theaterid 
     WHERE h.\"hallStatus\" = 'active'
     ORDER BY t.\"theaterName\", h.\"hallName\"
 ";
@@ -117,12 +118,13 @@ if (!empty($search)) {
 }
 
 // Count total records for pagination
+// Changed "theaterID" to "theaterid"
 $countQuery = "
     SELECT COUNT(*) as total 
     FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.movieid -- Changed \"movieID\" to movieid
+    JOIN movietable m ON ms.\"movieID\" = m.movieid 
     JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
-    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    JOIN theaters t ON h.theaterid = t.theaterid 
     " . $searchCondition;
 
 $stmtCountResult = pg_query_params($conn, $countQuery, $params);
@@ -133,12 +135,13 @@ $totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get schedules for current page
+// Changed "theaterID" to "theaterid"
 $query = "
-    SELECT ms.*, m.movietitle, h.\"hallName\", h.\"hallType\", t.\"theaterName\" -- Changed \"movieTitle\" to movietitle
+    SELECT ms.*, m.movietitle, h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
     FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.movieid -- Changed \"movieID\" to movieid
+    JOIN movietable m ON ms.\"movieID\" = m.movieid 
     JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
-    JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    JOIN theaters t ON h.theaterid = t.theaterid 
     " . $searchCondition . "
     ORDER BY ms.\"showDate\" DESC, ms.\"showTime\" DESC
     LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
@@ -435,7 +438,7 @@ pg_close($conn);
                                     <?php while ($schedule = pg_fetch_assoc($schedules)): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['movietitle']); ?></td> <!-- Changed to movietitle -->
+                                            <td><?php echo htmlspecialchars($schedule['movietitle']); ?></td>
                                             <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
                                             <td>
                                                 <?php echo htmlspecialchars($schedule['hallName']); ?> 
@@ -524,8 +527,8 @@ pg_close($conn);
                                     pg_result_seek($movies, 0);
                                 }
                                 while ($movie = pg_fetch_assoc($movies)): ?>
-                                    <option value="<?php echo htmlspecialchars($movie['movieid']); ?>"> <!-- Changed to movieid -->
-                                        <?php echo htmlspecialchars($movie['movietitle']); ?> <!-- Changed to movietitle -->
+                                    <option value="<?php echo htmlspecialchars($movie['movieid']); ?>">
+                                        <?php echo htmlspecialchars($movie['movietitle']); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>

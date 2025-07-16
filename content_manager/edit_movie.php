@@ -30,8 +30,9 @@ $successMessage = '';
 
 if ($movieId > 0) {
     // Fetch current movie details
-    // Ensure column names are lowercase in the SELECT query
-    $stmtQuery = "SELECT m.*, l.locationname FROM movietable m LEFT JOIN locations l ON m.locationid = l.locationid WHERE m.movieid = $1";
+    // Note: PostgreSQL column names are case-sensitive if created with mixed case and quoted,
+    // but often treated as lowercase if unquoted. Using double quotes for explicit case.
+    $stmtQuery = "SELECT m.*, l.\"locationName\" FROM movietable m LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" WHERE m.\"movieID\" = $1";
     $stmtResult = pg_query_params($conn, $stmtQuery, array($movieId));
     if ($stmtResult && pg_num_rows($stmtResult) > 0) {
         $movie = pg_fetch_assoc($stmtResult);
@@ -45,8 +46,7 @@ if ($movieId > 0) {
 }
 
 // Get all locations for dropdown
-// Ensure column names are lowercase in the SELECT query
-$locationsQuery = "SELECT locationid, locationname FROM locations WHERE locationstatus = 'active' ORDER BY locationname";
+$locationsQuery = "SELECT \"locationID\", \"locationName\" FROM locations WHERE \"locationStatus\" = 'active' ORDER BY \"locationName\"";
 $locations = pg_query($conn, $locationsQuery);
 if (!$locations) {
     die("Error fetching locations: " . pg_last_error($conn));
@@ -80,7 +80,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
             $uploadOk = 1;
 
             // Basic image validation
-            $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @to suppress warnings
+            $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @ to suppress warnings
             if($check === false) { $errorMessage = "File is not an image."; $uploadOk = 0; }
             if($_FILES["movieImage"]["size"] > 5000000) { $errorMessage = "Sorry, your file is too large (max 5MB)."; $uploadOk = 0; }
             if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" && $fileType != "gif" ) { $errorMessage = "Sorry, only JPG, JPEG, PNG & GIF files are allowed."; $uploadOk = 0; }
@@ -106,15 +106,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_movie'])) {
         
         // Only proceed with database update if no image upload error occurred
         if (empty($errorMessage) || strpos($errorMessage, "Image upload failed") === false) {
-            // Ensure column names are lowercase in the UPDATE query
-            $updateQuery = "UPDATE movietable SET movieimg = $1, movietitle = $2, moviegenre = $3, movieduration = $4, moviereldate = $5, moviedirector = $6, movieactors = $7, locationid = $8, mainhall = $9, viphall = $10, privatehall = $11 WHERE movieid = $12";
+            $updateQuery = "UPDATE movietable SET \"movieImg\" = $1, \"movieTitle\" = $2, \"movieGenre\" = $3, \"movieDuration\" = $4, \"movieRelDate\" = $5, \"movieDirector\" = $6, \"movieActors\" = $7, \"locationID\" = $8, mainhall = $9, viphall = $10, privatehall = $11 WHERE \"movieID\" = $12";
             $updateResult = pg_query_params($conn, $updateQuery, array($movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall, $movieId));
 
             if ($updateResult) {
                 $successMessage = "Movie updated successfully!";
                 // Refresh movie data after update
-                // Ensure column names are lowercase in the SELECT query
-                $stmtQuery = "SELECT m.*, l.locationname FROM movietable m LEFT JOIN locations l ON m.locationid = l.locationid WHERE m.movieid = $1";
+                $stmtQuery = "SELECT m.*, l.\"locationName\" FROM movietable m LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" WHERE m.\"movieID\" = $1";
                 $stmtResult = pg_query_params($conn, $stmtQuery, array($movieId));
                 $movie = pg_fetch_assoc($stmtResult); // Update $movie variable with new data
                 $movie = array_change_key_case($movie, CASE_LOWER);
@@ -398,12 +396,9 @@ pg_close($conn);
                                             if (pg_num_rows($locations) > 0) {
                                                 pg_result_seek($locations, 0);
                                             }
-                                            while ($location = pg_fetch_assoc($locations)): 
-                                                // Ensure fetched keys are lowercase for consistency
-                                                $location = array_change_key_case($location, CASE_LOWER);
-                                            ?>
-                                                <option value="<?php echo htmlspecialchars($location['locationid']); ?>" <?php echo ($movie['locationid'] == $location['locationid']) ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($location['locationname']); ?>
+                                            while ($location = pg_fetch_assoc($locations)): ?>
+                                                <option value="<?php echo htmlspecialchars($location['locationID']); ?>" <?php echo ($movie['locationid'] == $location['locationID']) ? 'selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars($location['locationName']); ?>
                                                 </option>
                                             <?php endwhile; ?>
                                         </select>

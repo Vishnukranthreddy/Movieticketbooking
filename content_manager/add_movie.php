@@ -24,8 +24,7 @@ if (!$conn) {
 }
 
 // Get all locations for dropdown
-// Ensure column names are lowercase as PostgreSQL typically stores them that way
-$locationsQuery = "SELECT locationid, locationname FROM locations WHERE locationstatus = 'active' ORDER BY locationname";
+$locationsQuery = "SELECT \"locationID\", \"locationName\" FROM locations WHERE \"locationStatus\" = 'active' ORDER BY \"locationName\"";
 $locations = pg_query($conn, $locationsQuery);
 if (!$locations) {
     die("Error fetching locations: " . pg_last_error($conn));
@@ -57,7 +56,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     
     // Check if image file is a actual image or fake image
     if(isset($_FILES["movieImage"]["tmp_name"]) && $_FILES["movieImage"]["tmp_name"] != "") {
-        $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @to suppress warnings
+        $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @ to suppress warnings
         if($check !== false) {
             $uploadOk = 1;
         } else {
@@ -92,8 +91,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             // File uploaded successfully, now insert movie data
             $movieImg = "img/" . $uniqueFileName; // Path to store in database (relative to project root)
 
-            // Ensure column names are lowercase in the INSERT query
-            $insertQuery = "INSERT INTO movietable (movieimg, movietitle, moviegenre, movieduration, moviereldate, moviedirector, movieactors, locationid, mainhall, viphall, privatehall) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
+            $insertQuery = "INSERT INTO movietable (\"movieImg\", \"movieTitle\", \"movieGenre\", \"movieDuration\", \"movieRelDate\", \"movieDirector\", \"movieActors\", \"locationID\", mainhall, viphall, privatehall) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
             $insertResult = pg_query_params($conn, $insertQuery, array($movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall));
             
             if ($insertResult) {
@@ -370,12 +368,9 @@ pg_close($conn);
                                         if (pg_num_rows($locations) > 0) {
                                             pg_result_seek($locations, 0);
                                         }
-                                        while ($location = pg_fetch_assoc($locations)): 
-                                            // Ensure fetched keys are lowercase for consistency
-                                            $location = array_change_key_case($location, CASE_LOWER);
-                                        ?>
-                                            <option value="<?php echo htmlspecialchars($location['locationid']); ?>">
-                                                <?php echo htmlspecialchars($location['locationname']); ?>
+                                        while ($location = pg_fetch_assoc($locations)): ?>
+                                            <option value="<?php echo htmlspecialchars($location['locationID']); ?>">
+                                                <?php echo htmlspecialchars($location['locationName']); ?>
                                             </option>
                                         <?php endwhile; ?>
                                     </select>

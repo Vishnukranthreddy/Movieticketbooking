@@ -38,15 +38,19 @@ if (!$activeMovieCountResult) {
 }
 $activeMovieCount = pg_fetch_assoc($activeMovieCountResult)['count'];
 
-// Get count of recent movies added/updated (e.g., last 5, or just the count)
-// For a dashboard, we just need the count, not the full list.
-$recentMoviesCountQuery = "SELECT COUNT(*) as count FROM movietable WHERE moviereldate >= CURRENT_DATE - INTERVAL '30 days'"; // Example: movies released in last 30 days
-$recentMoviesCountResult = pg_query($conn, $recentMoviesCountQuery);
-if (!$recentMoviesCountResult) {
-    die("Error fetching recent movies count: " . pg_last_error($conn));
-}
-$recentMoviesCount = pg_fetch_assoc($recentMoviesCountResult)['count'];
 
+// Get recent movies added/updated
+// Using lowercase column names
+$recentMoviesQuery = "
+    SELECT m.movieid, m.movietitle, m.moviegenre, m.movieduration, m.movieimg, m.moviereldate, l.locationname
+    FROM movietable m
+    LEFT JOIN locations l ON m.locationid = l.locationid
+    ORDER BY m.movieid DESC LIMIT 5
+";
+$recentMovies = pg_query($conn, $recentMoviesQuery);
+if (!$recentMovies) {
+    die("Error fetching recent movies: " . pg_last_error($conn));
+}
 
 pg_close($conn);
 ?>
@@ -147,7 +151,7 @@ pg_close($conn);
             margin-top: 10px;
             color: #343a40;
         }
-        .recent-table-container { /* This will be removed from dashboard.php */
+        .recent-table-container {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -339,20 +343,55 @@ pg_close($conn);
                     <div class="col-md-4">
                         <div class="dashboard-card">
                             <h4>Recent Additions</h4>
-                            <p><?php echo $recentMoviesCount; ?></p> 
+                            <p>5</p> <!-- Placeholder, can be dynamic -->
                         </div>
                     </div>
                 </div>
 
-                <!-- Removed the detailed recent movies table from the dashboard -->
-                <div class="row mt-4">
-                    <div class="col-md-12 text-center">
-                        <a href="movies.php" class="btn btn-primary btn-lg">
-                            <i class="fas fa-film"></i> View and Manage All Movies
-                        </a>
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="recent-table-container">
+                            <h3 class="mb-3">Recent Movies (Managed by You)</h3>
+                            <div class="table-responsive">
+                                <table class="table table-striped table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Image</th>
+                                            <th>Title</th>
+                                            <th>Genre</th>
+                                            <th>Duration</th>
+                                            <th>Release Date</th>
+                                            <th>Location</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (pg_num_rows($recentMovies) > 0): ?>
+                                            <?php while ($movie = pg_fetch_assoc($recentMovies)): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
+                                                    <td>
+                                                        <img src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image-mini">
+                                                    </td>
+                                                    <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
+                                                    <td><?php echo htmlspecialchars($movie['moviereldate'] ?? 'N/A'); ?></td> <!-- Added N/A check here -->
+                                                    <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
+                                                </tr>
+                                            <?php endwhile; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="7" class="text-center">No recent movies found</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <a href="movies.php" class="btn btn-primary btn-sm">View All Movies</a>
+                        </div>
                     </div>
                 </div>
-
             </main>
         </div>
     </div>

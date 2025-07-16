@@ -1,18 +1,24 @@
 <?php
 session_start();
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Fetch all active schedules, joining with movies, halls, and theaters
+// CURDATE() is replaced with CURRENT_DATE in PostgreSQL
 $schedulesQuery = "
     SELECT ms.scheduleID, ms.showDate, ms.showTime, ms.price,
            m.movieID, m.movieTitle, m.movieGenre, m.movieDuration, m.movieImg, m.movieDirector, m.movieActors,
@@ -21,48 +27,58 @@ $schedulesQuery = "
     JOIN movietable m ON ms.movieID = m.movieID
     JOIN theater_halls h ON ms.hallID = h.hallID
     JOIN theaters t ON h.theaterID = t.theaterID
-    WHERE ms.scheduleStatus = 'active' AND ms.showDate >= CURDATE()
+    WHERE ms.scheduleStatus = 'active' AND ms.showDate >= CURRENT_DATE
     ORDER BY ms.showDate ASC, m.movieTitle ASC, ms.showTime ASC
 ";
-$result = $conn->query($schedulesQuery);
+$result = pg_query($conn, $schedulesQuery);
 
 $groupedSchedules = [];
-if ($result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        $date = $row['showDate'];
-        $movieId = $row['movieID'];
+if ($result) { // Check if query executed successfully
+    if (pg_num_rows($result) > 0) {
+        while ($row = pg_fetch_assoc($result)) {
+            // Convert keys to lowercase for consistency with PostgreSQL's default behavior
+            $row = array_change_key_case($row, CASE_LOWER);
 
-        if (!isset($groupedSchedules[$date])) {
-            $groupedSchedules[$date] = [];
-        }
-        if (!isset($groupedSchedules[$date][$movieId])) {
-            $groupedSchedules[$date][$movieId] = [
-                'movieDetails' => [
-                    'movieID' => $row['movieID'],
-                    'movieTitle' => $row['movieTitle'],
-                    'movieGenre' => $row['movieGenre'],
-                    'movieDuration' => $row['movieDuration'],
-                    'movieImg' => $row['movieImg'],
-                    'movieDirector' => $row['movieDirector'],
-                    'movieActors' => $row['movieActors']
-                ],
-                'showtimes' => []
+            $date = $row['showdate'];
+            $movieId = $row['movieid'];
+
+            if (!isset($groupedSchedules[$date])) {
+                $groupedSchedules[$date] = [];
+            }
+            if (!isset($groupedSchedules[$date][$movieId])) {
+                $groupedSchedules[$date][$movieId] = [
+                    'movieDetails' => [
+                        'movieID' => $row['movieid'],
+                        'movieTitle' => $row['movietitle'],
+                        'movieGenre' => $row['moviegenre'],
+                        'movieDuration' => $row['movieduration'],
+                        'movieImg' => $row['movieimg'],
+                        'movieDirector' => $row['moviedirector'],
+                        'movieActors' => $row['movieactors']
+                    ],
+                    'showtimes' => []
+                ];
+            }
+            $groupedSchedules[$date][$movieId]['showtimes'][] = [
+                'scheduleID' => $row['scheduleid'],
+                'showTime' => $row['showtime'],
+                'price' => $row['price'],
+                'hallName' => $row['hallname'],
+                'hallType' => $row['halltype'],
+                'theaterName' => $row['theatername'],
+                'theaterAddress' => $row['theateraddress'],
+                'theaterCity' => $row['theatercity']
             ];
         }
-        $groupedSchedules[$date][$movieId]['showtimes'][] = [
-            'scheduleID' => $row['scheduleID'],
-            'showTime' => $row['showTime'],
-            'price' => $row['price'],
-            'hallName' => $row['hallName'],
-            'hallType' => $row['hallType'],
-            'theaterName' => $row['theaterName'],
-            'theaterAddress' => $row['theaterAddress'],
-            'theaterCity' => $row['theaterCity']
-        ];
     }
+} else {
+    // Handle query error
+    error_log("Schedule query failed: " . pg_last_error($conn));
+    // You might want to set an error message to display on the page
 }
 
-$conn->close();
+// Close PostgreSQL connection
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -191,7 +207,7 @@ $conn->close();
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <?php foreach ($moviesForDate as $movieData): ?>
                             <div class="movie-schedule-item p-6 flex items-start gap-6">
-                                <img src="../<?php echo htmlspecialchars($movieData['movieDetails']['movieImg']); ?>" alt="<?php echo htmlspecialchars($movieData['movieDetails']['movieTitle']); ?>" class="movie-poster-mini">
+                                <img src="../<?php echo htmlspecialchars($movieData['movieDetails']['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/80x120/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movieData['movieDetails']['movieTitle']); ?>" class="movie-poster-mini">
                                 
                                 <div class="flex-grow">
                                     <h2 class="text-3xl font-semibold text-white mb-2"><?php echo htmlspecialchars($movieData['movieDetails']['movieTitle']); ?></h2>

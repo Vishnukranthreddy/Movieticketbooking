@@ -1,15 +1,20 @@
 <?php
 session_start();
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $movie = null;
@@ -19,41 +24,49 @@ $errorMessage = '';
 if (isset($_GET['id']) && is_numeric($_GET['id'])) {
     $movieId = $_GET['id'];
 
-    // Fetch movie details
-    $stmt = $conn->prepare("SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = ?");
-    $stmt->bind_param("i", $movieId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows > 0) {
-        $movie = $result->fetch_assoc();
+    // Fetch movie details using a prepared statement
+    $movieQuery = "SELECT m.*, l.locationName FROM movietable m LEFT JOIN locations l ON m.locationID = l.locationID WHERE m.movieID = $1";
+    $movieResult = pg_query_params($conn, $movieQuery, array($movieId));
+
+    if ($movieResult) {
+        if (pg_num_rows($movieResult) > 0) {
+            $movie = pg_fetch_assoc($movieResult);
+            // Convert keys to lowercase for consistency with PostgreSQL's default behavior
+            $movie = array_change_key_case($movie, CASE_LOWER);
+        } else {
+            $errorMessage = "Movie not found.";
+        }
     } else {
-        $errorMessage = "Movie not found.";
+        $errorMessage = "Error fetching movie details: " . pg_last_error($conn);
     }
-    $stmt->close();
 
     // Fetch movie schedules
     if ($movie) {
         // Updated query to fetch hallPanoramaImg and theaterID
-        $stmt = $conn->prepare("
+        // CURDATE() is replaced with CURRENT_DATE in PostgreSQL
+        $schedulesQuery = "
             SELECT ms.scheduleID, ms.showDate, ms.showTime, ms.price,
-                   h.hallName, h.hallType, h.hallPanoramaImg, -- Added hallPanoramaImg
-                   t.theaterName, t.theaterAddress, t.theaterCity, t.theaterID -- Added theaterID
+                   h.hallName, h.hallType, h.hallPanoramaImg,
+                   t.theaterName, t.theaterAddress, t.theaterCity, t.theaterID
             FROM movie_schedules ms
             JOIN theater_halls h ON ms.hallID = h.hallID
             JOIN theaters t ON h.theaterID = t.theaterID
-            WHERE ms.movieID = ? AND ms.scheduleStatus = 'active' AND ms.showDate >= CURDATE()
+            WHERE ms.movieID = $1 AND ms.scheduleStatus = 'active' AND ms.showDate >= CURRENT_DATE
             ORDER BY ms.showDate ASC, ms.showTime ASC
-        ");
-        $stmt->bind_param("i", $movieId);
-        $stmt->execute();
-        $schedules = $stmt->get_result();
-        $stmt->close();
+        ";
+        $schedules = pg_query_params($conn, $schedulesQuery, array($movieId));
+
+        if (!$schedules) {
+            error_log("Error fetching schedules: " . pg_last_error($conn));
+            $errorMessage = "Error retrieving movie schedules.";
+        }
     }
 } else {
     $errorMessage = "Invalid movie ID.";
 }
 
-$conn->close();
+// Close PostgreSQL connection
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -61,7 +74,7 @@ $conn->close();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo $movie ? htmlspecialchars($movie['movieTitle']) . ' - Details' : 'Movie Details'; ?> - Showtime Select</title>
+    <title><?php echo $movie ? htmlspecialchars($movie['movietitle']) . ' - Details' : 'Movie Details'; ?> - Showtime Select</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome for icons -->
@@ -180,27 +193,29 @@ $conn->close();
         <?php elseif ($movie): ?>
             <div class="movie-detail-card p-8 flex flex-col md:flex-row items-center md:items-start gap-8">
                 <div class="md:w-1/3 flex-shrink-0">
-                    <img src="../<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-poster">
+                    <img src="../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-poster">
                 </div>
                 <div class="md:w-2/3">
-                    <h1 class="text-5xl font-bold text-white mb-4"><?php echo htmlspecialchars($movie['movieTitle']); ?></h1>
-                    <p class="text-lg text-gray-300 mb-2"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['movieGenre']); ?></p>
-                    <p class="text-lg text-gray-300 mb-2"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieDuration']); ?> minutes</p>
-                    <p class="text-lg text-gray-300 mb-2"><strong>Release Date:</strong> <?php echo date('F j, Y', strtotime($movie['movieRelDate'])); ?></p>
-                    <p class="text-lg text-gray-300 mb-2"><strong>Director:</strong> <?php echo htmlspecialchars($movie['movieDirector']); ?></p>
-                    <p class="text-lg text-gray-300 mb-4"><strong>Actors:</strong> <?php echo htmlspecialchars($movie['movieActors']); ?></p>
-                    <p class="text-lg text-gray-300 mb-4"><strong>Playing in:</strong> <?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></p>
+                    <h1 class="text-5xl font-bold text-white mb-4"><?php echo htmlspecialchars($movie['movietitle']); ?></h1>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['moviegenre']); ?></p>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieduration']); ?> minutes</p>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Release Date:</strong> <?php echo date('F j, Y', strtotime($movie['moviereldate'])); ?></p>
+                    <p class="text-lg text-gray-300 mb-2"><strong>Director:</strong> <?php echo htmlspecialchars($movie['moviedirector']); ?></p>
+                    <p class="text-lg text-gray-300 mb-4"><strong>Actors:</strong> <?php echo htmlspecialchars($movie['movieactors']); ?></p>
+                    <p class="text-lg text-gray-300 mb-4"><strong>Playing in:</strong> <?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></p>
                 </div>
             </div>
 
             <h2 class="text-4xl font-bold text-white text-center mt-12 mb-8">Available Showtimes</h2>
 
-            <?php if ($schedules && $schedules->num_rows > 0): ?>
+            <?php if ($schedules && pg_num_rows($schedules) > 0): ?>
                 <?php
                 // Group schedules by date
                 $groupedSchedules = [];
-                while ($schedule = $schedules->fetch_assoc()) {
-                    $date = $schedule['showDate'];
+                while ($schedule = pg_fetch_assoc($schedules)) {
+                    // Convert keys to lowercase for consistency with PostgreSQL's default behavior
+                    $schedule = array_change_key_case($schedule, CASE_LOWER);
+                    $date = $schedule['showdate'];
                     if (!isset($groupedSchedules[$date])) {
                         $groupedSchedules[$date] = [];
                     }
@@ -213,21 +228,21 @@ $conn->close();
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             <?php foreach ($dailySchedules as $schedule): ?>
                                 <div class="schedule-card p-5">
-                                    <p class="text-white text-xl font-medium mb-2"><i class="far fa-clock mr-2 text-e94560"></i> <?php echo date('h:i A', strtotime($schedule['showTime'])); ?></p>
-                                    <p class="text-gray-300 text-md mb-1"><i class="fas fa-building mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theaterName']); ?></p>
-                                    <p class="text-gray-300 text-md mb-1"><i class="fas fa-couch mr-2 text-e94560"></i> Hall: <?php echo htmlspecialchars($schedule['hallName']); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</p>
-                                    <p class="text-gray-300 text-md mb-4"><i class="fas fa-map-marker-alt mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theaterAddress']) . ', ' . htmlspecialchars($schedule['theaterCity']); ?></p>
+                                    <p class="text-white text-xl font-medium mb-2"><i class="far fa-clock mr-2 text-e94560"></i> <?php echo date('h:i A', strtotime($schedule['showtime'])); ?></p>
+                                    <p class="text-gray-300 text-md mb-1"><i class="fas fa-building mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theatername']); ?></p>
+                                    <p class="text-gray-300 text-md mb-1"><i class="fas fa-couch mr-2 text-e94560"></i> Hall: <?php echo htmlspecialchars($schedule['hallname']); ?> (<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['halltype']))); ?>)</p>
+                                    <p class="text-gray-300 text-md mb-4"><i class="fas fa-map-marker-alt mr-2 text-e94560"></i> <?php echo htmlspecialchars($schedule['theateraddress']) . ', ' . htmlspecialchars($schedule['theatercity']); ?></p>
                                     <p class="text-white text-2xl font-bold mb-4">₹<?php echo number_format($schedule['price'], 2); ?></p>
                                     
                                     <div class="schedule-buttons">
                                         <?php if (isset($_SESSION['user_id'])): ?>
-                                            <a href="booking.php?schedule_id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn-primary block text-center">Book Now</a>
+                                            <a href="booking.php?schedule_id=<?php echo htmlspecialchars($schedule['scheduleid']); ?>" class="btn-primary block text-center">Book Now</a>
                                         <?php else: ?>
                                             <a href="login.php?message=Please login to book tickets" class="btn-primary block text-center">Login to Book</a>
                                         <?php endif; ?>
 
-                                        <?php if (!empty($schedule['hallPanoramaImg'])): ?>
-                                            <a href="view_theater.php?theater_id=<?php echo htmlspecialchars($schedule['theaterID']); ?>&hall_panorama_img=<?php echo urlencode($schedule['hallPanoramaImg']); ?>&hall_name=<?php echo urlencode($schedule['hallName']); ?>&theater_name=<?php echo urlencode($schedule['theaterName']); ?>" class="btn-secondary-custom block text-center">View Hall Panorama</a>
+                                        <?php if (!empty($schedule['hallpanoramimg'])): ?>
+                                            <a href="view_theater.php?theater_id=<?php echo htmlspecialchars($schedule['theaterid']); ?>&hall_panorama_img=<?php echo urlencode($schedule['hallpanoramimg']); ?>&hall_name=<?php echo urlencode($schedule['hallname']); ?>&theater_name=<?php echo urlencode($schedule['theatername']); ?>" class="btn-secondary-custom block text-center">View Hall Panorama</a>
                                         <?php else: ?>
                                             <span class="btn-secondary-custom opacity-50 cursor-not-allowed text-sm">No Hall Panorama</span>
                                         <?php endif; ?>

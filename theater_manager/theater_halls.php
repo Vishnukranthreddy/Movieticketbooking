@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $theaterId = isset($_GET['theater_id']) ? (int)$_GET['theater_id'] : 0;
@@ -26,60 +31,49 @@ $successMessage = '';
 
 if ($theaterId > 0) {
     // Fetch theater name
-    $stmtTheater = $conn->prepare("SELECT theaterName FROM theaters WHERE theaterID = ?");
-    $stmtTheater->bind_param("i", $theaterId);
-    $stmtTheater->execute();
-    $resultTheater = $stmtTheater->get_result();
-    if ($rowTheater = $resultTheater->fetch_assoc()) {
+    $stmtTheaterQuery = "SELECT \"theaterName\" FROM theaters WHERE \"theaterID\" = $1";
+    $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
+    if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
+        $rowTheater = pg_fetch_assoc($stmtTheaterResult);
         $theaterName = $rowTheater['theaterName'];
     } else {
         $errorMessage = "Theater not found for ID: " . $theaterId;
         $theaterId = 0; // Invalidate theaterId if not found
     }
-    $stmtTheater->close();
 
     // Handle hall deletion
     if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
         $hallId = $_GET['delete_hall'];
 
         // Check for dependencies (schedules) before deleting hall
-        $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE hallID = ?");
-        $checkSchedulesQuery->bind_param("i", $hallId);
-        $checkSchedulesQuery->execute();
-        $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
-        $checkSchedulesQuery->close();
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallID\" = $1";
+        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
         if ($schedulesCount > 0) {
             $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
         } else {
             // Get hall panorama image path before deletion to remove the file
-            $stmtImg = $conn->prepare("SELECT hallPanoramaImg FROM theater_halls WHERE hallID = ?");
-            $stmtImg->bind_param("i", $hallId);
-            $stmtImg->execute();
-            $resultImg = $stmtImg->get_result();
+            $stmtImgQuery = "SELECT \"hallPanoramaImg\" FROM theater_halls WHERE \"hallID\" = $1";
+            $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
             $hallPanoramaImgPath = null;
-            if ($row = $resultImg->fetch_assoc()) {
+            if ($row = pg_fetch_assoc($stmtImgResult)) {
                 $hallPanoramaImgPath = $row['hallPanoramaImg'];
             }
-            $stmtImg->close();
 
-            $deleteHallQuery = $conn->prepare("DELETE FROM theater_halls WHERE hallID = ? AND theaterID = ?");
-            if ($deleteHallQuery === false) {
-                $errorMessage = "Failed to prepare delete hall query: " . $conn->error;
-            } else {
-                $deleteHallQuery->bind_param("ii", $hallId, $theaterId);
-                if ($deleteHallQuery->execute()) {
-                    $successMessage = "Hall deleted successfully!";
-                    // Delete the associated image file if it exists
-                    if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from theater_manager/ to project root
-                        if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
-                            unlink("../" . $hallPanoramaImgPath);
-                        }
+            $deleteHallQuery = "DELETE FROM theater_halls WHERE \"hallID\" = $1 AND \"theaterID\" = $2";
+            $deleteHallResult = pg_query_params($conn, $deleteHallQuery, array($hallId, $theaterId));
+            
+            if ($deleteHallResult) {
+                $successMessage = "Hall deleted successfully!";
+                // Delete the associated image file if it exists
+                if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from user/ to project root
+                    if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
+                        unlink("../" . $hallPanoramaImgPath);
                     }
-                } else {
-                    $errorMessage = "Error deleting hall: " . $conn->error;
                 }
-                $deleteHallQuery->close();
+            } else {
+                $errorMessage = "Error deleting hall: " . pg_last_error($conn);
             }
         }
     }
@@ -127,22 +121,16 @@ if ($theaterId > 0) {
         }
 
         if ($uploadOk !== 0) {
-            $addHallStmt = $conn->prepare("INSERT INTO theater_halls (theaterID, hallName, hallType, totalSeats, hallStatus, hallPanoramaImg) VALUES (?, ?, ?, ?, ?, ?)");
-            if ($addHallStmt === false) {
-                $errorMessage = "Failed to prepare add hall query: " . $conn->error;
+            $addHallQuery = "INSERT INTO theater_halls (\"theaterID\", \"hallName\", \"hallType\", \"totalSeats\", \"hallStatus\", \"hallPanoramaImg\") VALUES ($1, $2, $3, $4, $5, $6)";
+            $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
+            
+            if ($addHallResult) {
+                $successMessage = "Hall added successfully!";
             } else {
-                // CORRECTED bind_param: "isssis" -> "isisss" with 's' for panorama image
-                // TheaterID (int), HallName (string), HallType (string), TotalSeats (int), HallStatus (string), HallPanoramaImg (string)
-                $addHallStmt->bind_param("isisss", $theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg); // CORRECTED TYPE STRING
-                if ($addHallStmt->execute()) {
-                    $successMessage = "Hall added successfully!";
-                } else {
-                    $errorMessage = "Error adding hall to database: " . $addHallStmt->error;
-                    if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
-                        unlink("../" . $hallPanoramaImg); // Clean up uploaded file on DB error
-                    }
+                $errorMessage = "Error adding hall to database: " . pg_last_error($conn);
+                if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
+                    unlink("../" . $hallPanoramaImg); // Clean up uploaded file on DB error
                 }
-                $addHallStmt->close();
             }
         }
     }
@@ -195,23 +183,17 @@ if ($theaterId > 0) {
         }
 
         if ($uploadOk !== 0) {
-            $updateHallStmt = $conn->prepare("UPDATE theater_halls SET hallName = ?, hallType = ?, totalSeats = ?, hallStatus = ?, hallPanoramaImg = ? WHERE hallID = ? AND theaterID = ?");
-            if ($updateHallStmt === false) {
-                $errorMessage = "Failed to prepare update hall query: " . $conn->error;
+            $updateHallQuery = "UPDATE theater_halls SET \"hallName\" = $1, \"hallType\" = $2, \"totalSeats\" = $3, \"hallStatus\" = $4, \"hallPanoramaImg\" = $5 WHERE \"hallID\" = $6 AND \"theaterID\" = $7";
+            $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
+            
+            if ($updateHallResult) {
+                $successMessage = "Hall updated successfully!";
             } else {
-                // CORRECTED bind_param: "ssisii" -> "ssissii"
-                // hallName (s), hallType (s), totalSeats (i), hallStatus (s), hallPanoramaImg (s), hallID (i), theaterID (i)
-                $updateHallStmt->bind_param("ssissii", $hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId); // CORRECTED TYPE STRING
-                if ($updateHallStmt->execute()) {
-                    $successMessage = "Hall updated successfully!";
-                } else {
-                    $errorMessage = "Error updating hall in database: " . $updateHallStmt->error;
-                    // If DB update fails, consider deleting the newly uploaded panorama file to clean up
-                    if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
-                        unlink("../" . $newHallPanoramaImg);
-                    }
+                $errorMessage = "Error updating hall in database: " . pg_last_error($conn);
+                // If DB update fails, consider deleting the newly uploaded panorama file to clean up
+                if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
+                    unlink("../" . $newHallPanoramaImg);
                 }
-                $updateHallStmt->close();
             }
         }
     }
@@ -220,15 +202,11 @@ if ($theaterId > 0) {
     // Get all halls for this theater
     // Re-fetch after any add/delete/update operation
     if ($theaterId > 0) {
-        $hallsQuery = $conn->prepare("SELECT * FROM theater_halls WHERE theaterID = ? ORDER BY hallName");
-        if ($hallsQuery === false) {
-            $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to prepare hall fetch query: " . $conn->error;
+        $hallsQuery = "SELECT * FROM theater_halls WHERE \"theaterID\" = $1 ORDER BY \"hallName\"";
+        $halls = pg_query_params($conn, $hallsQuery, array($theaterId));
+        if (!$halls) {
+            $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to fetch halls: " . pg_last_error($conn);
             $halls = null;
-        } else {
-            $hallsQuery->bind_param("i", $theaterId);
-            $hallsQuery->execute();
-            $halls = $hallsQuery->get_result();
-            $hallsQuery->close();
         }
     } else {
         $halls = null; // No halls if theaterId is invalid
@@ -239,7 +217,7 @@ if ($theaterId > 0) {
     $halls = null;
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -503,7 +481,7 @@ $conn->close();
                     <div class="alert alert-info text-center">
                         Please select a theater from the <a href="theaters.php">Theaters list</a> to manage its halls.
                     </div>
-                <?php elseif ($halls && $halls->num_rows > 0): ?>
+                <?php elseif ($halls && pg_num_rows($halls) > 0): ?>
                     <div class="table-container">
                         <div class="table-responsive">
                             <table class="table table-striped table-hover">
@@ -519,7 +497,7 @@ $conn->close();
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php while ($hall = $halls->fetch_assoc()): ?>
+                                    <?php while ($hall = pg_fetch_assoc($halls)): ?>
                                         <tr>
                                             <td><?php echo htmlspecialchars($hall['hallID']); ?></td>
                                             <td><?php echo htmlspecialchars($hall['hallName']); ?></td>

@@ -7,19 +7,29 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Get all locations for dropdown
-$locations = $conn->query("SELECT * FROM locations WHERE locationStatus = 'active' ORDER BY locationName");
+// Ensure column names are lowercase as PostgreSQL typically stores them that way
+$locationsQuery = "SELECT locationid, locationname FROM locations WHERE locationstatus = 'active' ORDER BY locationname";
+$locations = pg_query($conn, $locationsQuery);
+if (!$locations) {
+    die("Error fetching locations: " . pg_last_error($conn));
+}
 
 // Process form submission
 $errorMessage = '';
@@ -40,13 +50,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Handle file upload
     $targetDir = "../../img/"; // Path relative to content_manager folder (two levels up)
     $fileName = basename($_FILES["movieImage"]["name"]);
-    $targetFilePath = $targetDir . $fileName;
+    $uniqueFileName = uniqid() . "_" . $fileName; // Generate a unique file name
+    $targetFilePath = $targetDir . $uniqueFileName;
     $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
     $uploadOk = 1;
     
     // Check if image file is a actual image or fake image
     if(isset($_FILES["movieImage"]["tmp_name"]) && $_FILES["movieImage"]["tmp_name"] != "") {
-        $check = getimagesize($_FILES["movieImage"]["tmp_name"]);
+        $check = @getimagesize($_FILES["movieImage"]["tmp_name"]); // Use @to suppress warnings
         if($check !== false) {
             $uploadOk = 1;
         } else {
@@ -79,30 +90,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // if everything is ok, try to upload file
         if (move_uploaded_file($_FILES["movieImage"]["tmp_name"], $targetFilePath)) {
             // File uploaded successfully, now insert movie data
-            $movieImg = "img/" . $fileName; // Path to store in database (relative to project root)
+            $movieImg = "img/" . $uniqueFileName; // Path to store in database (relative to project root)
 
-            $stmt = $conn->prepare("INSERT INTO movietable (movieImg, movieTitle, movieGenre, movieDuration, movieRelDate, movieDirector, movieActors, locationID, mainhall, viphall, privatehall) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            // 's' for string, 'i' for integer, 's' for string for movieRelDate (date can be treated as string for bind_param)
-            $stmt->bind_param("sssssssiiss", $movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall);
+            // Ensure column names are lowercase in the INSERT query
+            $insertQuery = "INSERT INTO movietable (movieimg, movietitle, moviegenre, movieduration, moviereldate, moviedirector, movieactors, locationid, mainhall, viphall, privatehall) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
+            $insertResult = pg_query_params($conn, $insertQuery, array($movieImg, $movieTitle, $movieGenre, $movieDuration, $movieRelDate, $movieDirector, $movieActors, $locationID, $mainHall, $vipHall, $privateHall));
             
-            if ($stmt->execute()) {
+            if ($insertResult) {
                 $successMessage = "Movie added successfully!";
                 // Redirect to movies page after successful addition
                 header("Location: movies.php?success=1");
                 exit();
             } else {
-                $errorMessage = "Error: " . $stmt->error;
+                $errorMessage = "Error: " . pg_last_error($conn);
                 // If DB insert fails, consider deleting the uploaded file to clean up
-                unlink($targetFilePath); 
+                if (file_exists($targetFilePath)) {
+                    unlink($targetFilePath); 
+                }
             }
-            $stmt->close();
         } else {
             $errorMessage = "Sorry, there was an error uploading your file.";
         }
     }
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -353,11 +365,17 @@ $conn->close();
                                     <label for="locationID">Location</label>
                                     <select class="form-control" id="locationID" name="locationID">
                                         <option value="">Select Location (Optional)</option>
-                                        <?php // Reset location results pointer if already fetched
-                                        if ($locations->num_rows > 0) $locations->data_seek(0);
-                                        while ($location = $locations->fetch_assoc()): ?>
-                                            <option value="<?php echo htmlspecialchars($location['locationID']); ?>">
-                                                <?php echo htmlspecialchars($location['locationName']); ?>
+                                        <?php 
+                                        // Reset location results pointer if already fetched
+                                        if (pg_num_rows($locations) > 0) {
+                                            pg_result_seek($locations, 0);
+                                        }
+                                        while ($location = pg_fetch_assoc($locations)): 
+                                            // Ensure fetched keys are lowercase for consistency
+                                            $location = array_change_key_case($location, CASE_LOWER);
+                                        ?>
+                                            <option value="<?php echo htmlspecialchars($location['locationid']); ?>">
+                                                <?php echo htmlspecialchars($location['locationname']); ?>
                                             </option>
                                         <?php endwhile; ?>
                                     </select>
@@ -371,7 +389,7 @@ $conn->close();
                             </div>
                         </div>
                         
-                        <!-- Hall Price inputs (if still needed, otherwise remove) -->
+                        <!-- Hall Price inputs -->
                         <div class="row">
                             <div class="col-md-4">
                                 <div class="form-group">

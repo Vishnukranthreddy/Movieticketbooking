@@ -12,17 +12,21 @@ if (!isset($_SESSION['admin_id']) || $_SESSION['admin_role'] != 1) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    $statusMessage = "Database connection failed: " . $conn->connect_error;
-    // Log error for debugging on server side if possible
-    error_log("DB Connection Error in delete_user.php: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    $statusMessage = "Database connection failed: " . pg_last_error();
+    error_log("DB Connection Error in delete_user.php: " . pg_last_error());
     header("Location: users.php?message=" . urlencode($statusMessage) . "&type=" . $messageType);
     exit();
 }
@@ -37,36 +41,28 @@ if ($userId > 0) {
     } else {
         // Check if the user is associated with any bookings (via bookingEmail or username)
         // Assuming `users.username` corresponds to `bookingtable.bookingEmail`
-        $checkBookingsQuery = $conn->prepare("SELECT COUNT(*) as count FROM bookingtable WHERE bookingEmail = (SELECT username FROM users WHERE id = ?)");
-        if ($checkBookingsQuery === false) {
-             $statusMessage = "Failed to prepare booking check query: " . $conn->error;
+        $checkBookingsQuery = "SELECT COUNT(*) as count FROM bookingtable WHERE \"bookingEmail\" = (SELECT username FROM users WHERE id = $1)";
+        $checkBookingsResult = pg_query_params($conn, $checkBookingsQuery, array($userId));
+        
+        if (!$checkBookingsResult) {
+            $statusMessage = "Failed to check user bookings: " . pg_last_error($conn);
         } else {
-            $checkBookingsQuery->bind_param("i", $userId);
-            $checkBookingsQuery->execute();
-            $bookingsResult = $checkBookingsQuery->get_result();
-            $bookingsCount = $bookingsResult->fetch_assoc()['count'];
-            $checkBookingsQuery->close();
+            $bookingsCount = pg_fetch_assoc($checkBookingsResult)['count'];
 
             if ($bookingsCount > 0) {
                 $statusMessage = "Cannot delete user. This user has " . $bookingsCount . " booking(s). Please delete their bookings first.";
                 $messageType = "warning"; // Use warning for non-critical user-fixable issues
             } else {
                 // Proceed with deletion
-                $deleteQuery = $conn->prepare("DELETE FROM users WHERE id = ?");
-                if ($deleteQuery === false) {
-                    $statusMessage = "Failed to prepare user deletion query: " . $conn->error;
+                $deleteQuery = "DELETE FROM users WHERE id = $1";
+                $deleteResult = pg_query_params($conn, $deleteQuery, array($userId));
+                
+                if ($deleteResult) {
+                    $statusMessage = "User deleted successfully!";
+                    $messageType = "success";
                 } else {
-                    $deleteQuery->bind_param("i", $userId);
-                    
-                    if ($deleteQuery->execute()) {
-                        $statusMessage = "User deleted successfully!";
-                        $messageType = "success";
-                    } else {
-                        $statusMessage = "Error deleting user: " . $conn->error;
-                        // Log specific DB error for server-side debugging
-                        error_log("DB Delete Error in delete_user.php: " . $conn->error);
-                    }
-                    $deleteQuery->close();
+                    $statusMessage = "Error deleting user: " . pg_last_error($conn);
+                    error_log("DB Delete Error in delete_user.php: " . pg_last_error($conn));
                 }
             }
         }
@@ -75,7 +71,7 @@ if ($userId > 0) {
     $statusMessage = "Invalid user ID provided for deletion.";
 }
 
-$conn->close();
+pg_close($conn);
 
 // Redirect back to users.php with the status message
 header("Location: users.php?message=" . urlencode($statusMessage) . "&type=" . $messageType);

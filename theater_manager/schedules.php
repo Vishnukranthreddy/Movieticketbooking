@@ -7,158 +7,217 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
-// Handle schedule deletion
-$successMessage = '';
+$theaterId = isset($_GET['theater_id']) ? (int)$_GET['theater_id'] : 0;
+$theaterName = "N/A";
+$halls = null;
 $errorMessage = '';
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $scheduleId = $_GET['delete'];
-    
-    // Check if the schedule exists
-    $checkQuery = $conn->prepare("SELECT scheduleID FROM movie_schedules WHERE scheduleID = ?");
-    $checkQuery->bind_param("i", $scheduleId);
-    $checkQuery->execute();
-    $result = $checkQuery->get_result();
-    
-    if ($result->num_rows > 0) {
-        // Check if schedule is used in bookings
-        $checkBookingsQuery = $conn->prepare("SELECT COUNT(*) as count FROM bookingtable WHERE scheduleID = ?");
-        $checkBookingsQuery->bind_param("i", $scheduleId);
-        $checkBookingsQuery->execute();
-        $bookingsCount = $checkBookingsQuery->get_result()->fetch_assoc()['count'];
-        $checkBookingsQuery->close();
-        
-        if ($bookingsCount > 0) {
-            $errorMessage = "Cannot delete schedule. It is associated with " . $bookingsCount . " booking(s).";
+$successMessage = '';
+
+if ($theaterId > 0) {
+    // Fetch theater name
+    $stmtTheaterQuery = "SELECT theatername FROM theaters WHERE theaterid = $1";
+    $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
+    if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
+        $rowTheater = pg_fetch_assoc($stmtTheaterResult);
+        $theaterName = $rowTheater['theatername'];
+    } else {
+        $errorMessage = "Theater not found for ID: " . $theaterId;
+        $theaterId = 0; // Invalidate theaterId if not found
+    }
+
+    // Handle hall deletion
+    if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
+        $hallId = $_GET['delete_hall'];
+
+        // Check for dependencies (schedules) before deleting hall
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE hallid = $1";
+        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
+
+        if ($schedulesCount > 0) {
+            $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
         } else {
-            // Delete the schedule
-            $deleteQuery = $conn->prepare("DELETE FROM movie_schedules WHERE scheduleID = ?");
-            $deleteQuery->bind_param("i", $scheduleId);
-            
-            if ($deleteQuery->execute()) {
-                $successMessage = "Schedule deleted successfully!";
-            } else {
-                $errorMessage = "Error deleting schedule: " . $conn->error;
+            // Get hall panorama image path before deletion to remove the file
+            $stmtImgQuery = "SELECT hallpanoraimg FROM theater_halls WHERE hallid = $1";
+            $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
+            $hallPanoramaImgPath = null;
+            if ($row = pg_fetch_assoc($stmtImgResult)) {
+                $hallPanoramaImgPath = $row['hallpanoraimg'];
             }
-            $deleteQuery->close();
+
+            $deleteHallQuery = "DELETE FROM theater_halls WHERE hallid = $1 AND theaterid = $2";
+            $deleteHallResult = pg_query_params($conn, $deleteHallQuery, array($hallId, $theaterId));
+            
+            if ($deleteHallResult) {
+                $successMessage = "Hall deleted successfully!";
+                // Delete the associated image file if it exists
+                if ($hallPanoramaImgPath && file_exists("../" . $hallPanoramaImgPath)) { // Path from user/ to project root
+                    if (strpos($hallPanoramaImgPath, 'img/panoramas/') === 0 && realpath("../" . $hallPanoramaImgPath)) {
+                        unlink("../" . $hallPanoramaImgPath);
+                    }
+                }
+            } else {
+                $errorMessage = "Error deleting hall: " . pg_last_error($conn);
+            }
+        }
+    }
+
+    // Handle hall addition
+    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_hall'])) {
+        $hallName = $_POST['hallName'];
+        $hallType = $_POST['hallType'];
+        $totalSeats = $_POST['totalSeats'];
+        $hallStatus = $_POST['hallStatus'];
+        
+        $hallPanoramaImg = null; // Initialize to null
+        $uploadOk = 1; // Flag for panorama image upload status
+
+        // Handle panorama image upload if provided
+        if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+            $targetDir = "../img/panoramas/"; // Path relative to theater_manager/ folder
+            if (!is_dir($targetDir)) {
+                mkdir($targetDir, 0755, true);
+            }
+
+            $fileName = basename($_FILES["hallPanoramaImage"]["name"]);
+            $uniqueFileName = uniqid() . "_" . $fileName;
+            $targetFilePath = $targetDir . $uniqueFileName;
+            $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+            
+            $check = @getimagesize($_FILES["hallPanoramaImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "Panorama file is not a valid image."; $uploadOk = 0; }
+            if($_FILES["hallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, panorama file is too large (max 15MB)."; $uploadOk = 0; }
+            if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for panoramas."; $uploadOk = 0; }
+
+            if ($uploadOk == 0) {
+                // Error message already set
+            } else {
+                if (move_uploaded_file($_FILES["hallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                    $hallPanoramaImg = "img/panoramas/" . $uniqueFileName; // Path to store in database (relative to project root)
+                } else {
+                    $errorMessage = "Sorry, there was an error uploading the panorama file to the server.";
+                    $uploadOk = 0;
+                }
+            }
+        } else if (isset($_FILES["hallPanoramaImage"]) && $_FILES["hallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+            $errorMessage = "File upload error for panorama: " . $_FILES["hallPanoramaImage"]["error"];
+            $uploadOk = 0;
+        }
+
+        if ($uploadOk !== 0) {
+            $addHallQuery = "INSERT INTO theater_halls (theaterid, hallname, halltype, totalseats, hallstatus, hallpanoraimg) VALUES ($1, $2, $3, $4, $5, $6)";
+            $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
+            
+            if ($addHallResult) {
+                $successMessage = "Hall added successfully!";
+            } else {
+                $errorMessage = "Error adding hall to database: " . pg_last_error($conn);
+                if ($hallPanoramaImg && file_exists("../" . $hallPanoramaImg)) {
+                    unlink("../" . $hallPanoramaImg); // Clean up uploaded file on DB error
+                }
+            }
+        }
+    }
+
+    // Handle hall update
+    if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_hall'])) {
+        $hallIdToUpdate = $_POST['edit_hallId'];
+        $hallName = $_POST['edit_hallName'];
+        $hallType = $_POST['edit_hallType'];
+        $totalSeats = $_POST['edit_totalSeats'];
+        $hallStatus = $_POST['edit_hallStatus'];
+
+        $currentHallPanoramaImg = $_POST['current_hall_panorama_img'] ?? null; // Get existing path
+        $newHallPanoramaImg = $currentHallPanoramaImg; // Assume current image by default
+        $uploadOk = 1;
+
+        // Handle new panorama image upload for update
+        if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] == UPLOAD_ERR_OK) {
+            $targetDir = "../img/panoramas/";
+            if (!is_dir($targetDir)) { mkdir($targetDir, 0755, true); }
+            $fileName = basename($_FILES["editHallPanoramaImage"]["name"]);
+            $uniqueFileName = uniqid() . "_" . $fileName;
+            $targetFilePath = $targetDir . $uniqueFileName;
+            $fileType = strtolower(pathinfo($targetFilePath, PATHINFO_EXTENSION));
+
+            $check = @getimagesize($_FILES["editHallPanoramaImage"]["tmp_name"]);
+            if($check === false) { $errorMessage = "New panorama file is not a valid image."; $uploadOk = 0; }
+            if($_FILES["editHallPanoramaImage"]["size"] > 15000000) { $errorMessage = "Sorry, new panorama file is too large (max 15MB)."; $uploadOk = 0; }
+            if($fileType != "jpg" && $fileType != "png" && $fileType != "jpeg" ) { $errorMessage = "Sorry, only JPG, JPEG, and PNG files are allowed for new panoramas."; $uploadOk = 0; }
+
+            if ($uploadOk == 0) {
+                // Error already set
+            } else {
+                if (move_uploaded_file($_FILES["editHallPanoramaImage"]["tmp_name"], $targetFilePath)) {
+                    $newHallPanoramaImg = "img/panoramas/" . $uniqueFileName;
+                    // Delete old panorama file if different and exists
+                    if (!empty($currentHallPanoramaImg) && $currentHallPanoramaImg != $newHallPanoramaImg && file_exists("../" . $currentHallPanoramaImg)) {
+                        if (strpos($currentHallPanoramaImg, 'img/panoramas/') === 0 && realpath("../" . $currentHallPanoramaImg)) {
+                            unlink("../" . $currentHallPanoramaImg);
+                        }
+                    }
+                } else {
+                    $errorMessage = "Error uploading new panorama file for update.";
+                    $uploadOk = 0;
+                }
+            }
+        } else if (isset($_FILES["editHallPanoramaImage"]) && $_FILES["editHallPanoramaImage"]["error"] != UPLOAD_ERR_NO_FILE) {
+            $errorMessage = "File upload error for new panorama: " . $_FILES["editHallPanoramaImage"]["error"];
+            $uploadOk = 0;
+        }
+
+        if ($uploadOk !== 0) {
+            $updateHallQuery = "UPDATE theater_halls SET hallname = $1, halltype = $2, totalseats = $3, hallstatus = $4, hallpanoraimg = $5 WHERE hallid = $6 AND theaterid = $7";
+            $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
+            
+            if ($updateHallResult) {
+                $successMessage = "Hall updated successfully!";
+            } else {
+                $errorMessage = "Error updating hall in database: " . pg_last_error($conn);
+                // If DB update fails, consider deleting the newly uploaded panorama file to clean up
+                if ($newHallPanoramaImg != $currentHallPanoramaImg && file_exists("../" . $newHallPanoramaImg)) {
+                    unlink("../" . $newHallPanoramaImg);
+                }
+            }
+        }
+    }
+
+
+    // Get all halls for this theater
+    // Re-fetch after any add/delete/update operation
+    if ($theaterId > 0) {
+        $hallsQuery = "SELECT * FROM theater_halls WHERE theaterid = $1 ORDER BY hallname";
+        $halls = pg_query_params($conn, $hallsQuery, array($theaterId));
+        if (!$halls) {
+            $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to fetch halls: " . pg_last_error($conn);
+            $halls = null;
         }
     } else {
-        $errorMessage = "Schedule not found!";
+        $halls = null; // No halls if theaterId is invalid
     }
-    $checkQuery->close();
-}
 
-// Handle schedule addition
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
-    $movieId = $_POST['movieId'];
-    $hallId = $_POST['hallId'];
-    $showDate = $_POST['showDate'];
-    $showTime = $_POST['showTime'];
-    $price = $_POST['price'];
-    $status = $_POST['status'];
-    
-    $stmt = $conn->prepare("INSERT INTO movie_schedules (movieID, hallID, showDate, showTime, price, scheduleStatus) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("iissds", $movieId, $hallId, $showDate, $showTime, $price, $status); // Use 'd' for decimal/double
-    
-    if ($stmt->execute()) {
-        $successMessage = "Schedule added successfully!";
-    } else {
-        $errorMessage = "Error adding schedule: " . $stmt->error;
-    }
-    $stmt->close();
-}
-
-// Get all movies for dropdown
-$movies = $conn->query("SELECT movieID, movieTitle FROM movietable ORDER BY movieTitle");
-
-// Get all theater halls for dropdown
-$halls = $conn->query("
-    SELECT h.hallID, h.hallName, h.hallType, t.theaterName 
-    FROM theater_halls h
-    JOIN theaters t ON h.theaterID = t.theaterID
-    WHERE h.hallStatus = 'active'
-    ORDER BY t.theaterName, h.hallName
-");
-
-// Get all schedules with pagination
-$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$recordsPerPage = 10;
-$offset = ($page - 1) * $recordsPerPage;
-
-// Search functionality
-$search = isset($_GET['search']) ? $_GET['search'] : '';
-$searchCondition = '';
-$params = [];
-$types = '';
-
-if (!empty($search)) {
-    $searchParam = "%" . $search . "%";
-    $searchCondition = "WHERE m.movieTitle LIKE ? OR t.theaterName LIKE ?";
-    $params = [$searchParam, $searchParam];
-    $types = "ss";
-}
-
-// Count total records for pagination
-$countQuery = "
-    SELECT COUNT(*) as total 
-    FROM movie_schedules ms
-    JOIN movietable m ON ms.movieID = m.movieID
-    JOIN theater_halls h ON ms.hallID = h.hallID
-    JOIN theaters t ON h.theaterID = t.theaterID
-    " . $searchCondition;
-
-$stmtCount = $conn->prepare($countQuery);
-if (!empty($searchCondition)) {
-    $stmtCount->bind_param($types, ...$params);
-}
-$stmtCount->execute();
-$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
-$stmtCount->close();
-
-$totalPages = ceil($totalRecords / $recordsPerPage);
-
-// Get schedules for current page
-$query = "
-    SELECT ms.*, m.movieTitle, h.hallName, h.hallType, t.theaterName
-    FROM movie_schedules ms
-    JOIN movietable m ON ms.movieID = m.movieID
-    JOIN theater_halls h ON ms.hallID = h.hallID
-    JOIN theaters t ON h.theaterID = t.theaterID
-    " . $searchCondition . "
-    ORDER BY ms.showDate DESC, ms.showTime DESC
-    LIMIT ?, ?";
-
-$stmt = $conn->prepare($query);
-
-// Rebind parameters for the main query
-$query_params = $params; // Copy search parameters
-$query_types = $types; // Copy search types
-
-$query_params[] = $offset;
-$query_params[] = $recordsPerPage;
-$query_types .= "ii";
-
-if (!empty($searchCondition)) {
-    $stmt->bind_param($query_types, ...$query_params);
 } else {
-    $stmt->bind_param("ii", $offset, $recordsPerPage);
+    $errorMessage = "No theater ID provided. Please select a theater from the Theaters list to manage its halls.";
+    $halls = null;
 }
 
-$stmt->execute();
-$schedules = $stmt->get_result();
-$stmt->close();
-
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -166,10 +225,10 @@ $conn->close();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Schedules - Showtime Select Admin</title>
+    <title>Manage Halls for <?php echo htmlspecialchars($theaterName); ?> - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -239,7 +298,7 @@ $conn->close();
             margin-left: 240px;
             padding: 20px;
         }
-        .table-container {
+        .table-container, .form-container {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -252,13 +311,6 @@ $conn->close();
             align-items: center;
             margin-bottom: 20px;
         }
-        .pagination {
-            justify-content: center;
-            margin-top: 20px;
-        }
-        .search-box {
-            margin-bottom: 20px;
-        }
         .status-badge {
             padding: 5px 10px;
             border-radius: 20px;
@@ -269,16 +321,30 @@ $conn->close();
             background-color: #d4edda;
             color: #155724;
         }
-        .status-cancelled {
+        .status-inactive {
             background-color: #f8d7da;
             color: #721c24;
         }
-        .status-completed {
-            background-color: #e2e3e5;
-            color: #383d41;
-        }
-        .hall-type {
+        .hall-type-badge {
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
             text-transform: capitalize;
+            background-color: #007bff; /* default blue */
+            color: white;
+        }
+        .hall-type-badge.main-hall { background-color: #28a745; } /* green */
+        .hall-type-badge.vip-hall { background-color: #ffc107; color: #343a40; } /* yellow */
+        .hall-type-badge.private-hall { background-color: #6f42c1; } /* purple */
+        .preview-image {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px;
+            display: block;
         }
     </style>
 </head>
@@ -307,7 +373,7 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="theaters.php">
+                            <a class="nav-link active" href="theaters.php">
                                 <i class="fas fa-building"></i>
                                 Theaters
                             </a>
@@ -319,7 +385,7 @@ $conn->close();
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link active" href="schedules.php">
+                            <a class="nav-link" href="schedules.php">
                                 <i class="fas fa-calendar-alt"></i>
                                 Schedules
                             </a>
@@ -380,13 +446,20 @@ $conn->close();
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Manage Schedules</h1>
-                    <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#addScheduleModal">
-                        <i class="fas fa-plus"></i> Add New Schedule
-                    </button>
+                    <h1>Manage Halls for <?php echo htmlspecialchars($theaterName); ?></h1>
+                    <div class="d-flex align-items-center">
+                        <a href="theaters.php" class="btn btn-secondary mr-2">
+                            <i class="fas fa-arrow-left"></i> Back to Theaters
+                        </a>
+                        <?php if ($theaterId > 0): ?>
+                        <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#addHallModal">
+                            <i class="fas fa-plus"></i> Add New Hall
+                        </button>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
-                <?php if (isset($successMessage)): ?>
+                <?php if (isset($successMessage) && !empty($successMessage)): ?>
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <?php echo $successMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -395,7 +468,7 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
-                <?php if (isset($errorMessage)): ?>
+                <?php if (isset($errorMessage) && !empty($errorMessage)): ?>
                     <div class="alert alert-danger alert-dismissible fade show" role="alert">
                         <?php echo $errorMessage; ?>
                         <button type="button" class="close" data-dismiss="alert" aria-label="Close">
@@ -404,174 +477,177 @@ $conn->close();
                     </div>
                 <?php endif; ?>
 
-                <div class="table-container">
-                    <div class="search-box">
-                        <form action="" method="GET" class="form-inline">
-                            <div class="input-group w-100">
-                                <input type="text" name="search" class="form-control" placeholder="Search by movie or theater" value="<?php echo htmlspecialchars($search); ?>">
-                                <div class="input-group-append">
-                                    <button class="btn btn-outline-secondary" type="submit">
-                                        <i class="fas fa-search"></i>
-                                    </button>
-                                    <?php if (!empty($search)): ?>
-                                        <a href="schedules.php" class="btn btn-outline-danger">
-                                            <i class="fas fa-times"></i>
-                                        </a>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </form>
+                <?php if ($theaterId == 0): ?>
+                    <div class="alert alert-info text-center">
+                        Please select a theater from the <a href="theaters.php">Theaters list</a> to manage its halls.
                     </div>
-
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead class="thead-dark">
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Movie</th>
-                                    <th>Theater</th>
-                                    <th>Hall</th>
-                                    <th>Date</th>
-                                    <th>Time</th>
-                                    <th>Price</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($schedules->num_rows > 0): ?>
-                                    <?php while ($schedule = $schedules->fetch_assoc()): ?>
+                <?php elseif ($halls && pg_num_rows($halls) > 0): ?>
+                    <div class="table-container">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="thead-dark">
+                                    <tr>
+                                        <th>Hall ID</th>
+                                        <th>Hall Name</th>
+                                        <th>Hall Type</th>
+                                        <th>Total Seats</th>
+                                        <th>Panorama</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php while ($hall = pg_fetch_assoc($halls)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['movieTitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallid']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallname']); ?></td>
                                             <td>
-                                                <?php echo htmlspecialchars($schedule['hallName']); ?> 
-                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</span>
+                                                <span class="hall-type-badge <?php echo htmlspecialchars($hall['halltype']); ?>">
+                                                    <?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['halltype']))); ?>
+                                                </span>
                                             </td>
-                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showDate']))); ?></td>
-                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showTime']))); ?></td>
-                                            <td>₹<?php echo number_format($schedule['price'], 2); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['totalseats']); ?></td>
                                             <td>
-                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['scheduleStatus']); ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($schedule['scheduleStatus'])); ?>
+                                                <?php if (!empty($hall['hallpanoraimg'])): ?>
+                                                    <img src="../<?php echo htmlspecialchars($hall['hallpanoraimg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
+                                                <?php else: ?>
+                                                    N/A
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <span class="status-badge <?php echo $hall['hallstatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($hall['hallstatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-warning"> <!-- Fixed: Points to edit_schedule.php -->
+                                                <button type="button" class="btn btn-sm btn-warning edit-hall" 
+                                                        data-id="<?php echo htmlspecialchars($hall['hallid']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($hall['hallname']); ?>"
+                                                        data-type="<?php echo htmlspecialchars($hall['halltype']); ?>"
+                                                        data-seats="<?php echo htmlspecialchars($hall['totalseats']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($hall['hallstatus']); ?>"
+                                                        data-panorama="<?php echo htmlspecialchars($hall['hallpanoraimg'] ?? ''); ?>"
+                                                        data-toggle="modal" data-target="#editHallModal">
                                                     <i class="fas fa-edit"></i>
-                                                </a>
-                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
+                                                </button>
+                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete_hall=<?php echo htmlspecialchars($hall['hallid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete associated schedules and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
                                         </tr>
                                     <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="9" class="text-center">No schedules found</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-
-                    <?php if ($totalPages > 1): ?>
-                        <nav aria-label="Page navigation">
-                            <ul class="pagination">
-                                <?php if ($page > 1): ?>
-                                    <li class="page-item">
-                                        <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Previous">
-                                            <span aria-hidden="true">&laquo;</span>
-                                        </a>
-                                    </li>
-                                <?php endif; ?>
-
-                                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>">
-                                            <?php echo $i; ?>
-                                        </a>
-                                    </li>
-                                <?php endfor; ?>
-
-                                <?php if ($page < $totalPages): ?>
-                                    <li class="page-item">
-                                        <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Next">
-                                            <span aria-hidden="true">&raquo;</span>
-                                        </a>
-                                    </li>
-                                <?php endif; ?>
-                            </ul>
-                        </nav>
-                    <?php endif; ?>
-                </div>
+                <?php else: ?>
+                    <div class="alert alert-info text-center">
+                        No halls found for <?php echo htmlspecialchars($theaterName); ?>. Click "Add New Hall" to get started.
+                    </div>
+                <?php endif; ?>
             </main>
         </div>
     </div>
 
-    <!-- Add Schedule Modal -->
-    <div class="modal fade" id="addScheduleModal" tabindex="-1" role="dialog" aria-labelledby="addScheduleModalLabel" aria-hidden="true">
+    <!-- Add Hall Modal -->
+    <div class="modal fade" id="addHallModal" tabindex="-1" role="dialog" aria-labelledby="addHallModalLabel" aria-hidden="true">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="addScheduleModalLabel">Add New Schedule</h5>
+                    <h5 class="modal-title" id="addHallModalLabel">Add New Hall to <?php echo htmlspecialchars($theaterName); ?></h5>
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                         <span aria-hidden="true">&times;</span>
                     </button>
                 </div>
-                <form action="" method="POST">
+                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
                     <div class="modal-body">
                         <div class="form-group">
-                            <label for="movieId">Movie</label>
-                            <select class="form-control" id="movieId" name="movieId" required>
-                                <option value="">Select Movie</option>
-                                <?php // Reset movie results pointer if already fetched
-                                if ($movies->num_rows > 0) $movies->data_seek(0);
-                                while ($movie = $movies->fetch_assoc()): ?>
-                                    <option value="<?php echo htmlspecialchars($movie['movieID']); ?>">
-                                        <?php echo htmlspecialchars($movie['movieTitle']); ?>
-                                    </option>
-                                <?php endwhile; ?>
+                            <label for="hallName">Hall Name</label>
+                            <input type="text" class="form-control" id="hallName" name="hallName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="hallType">Hall Type</label>
+                            <select class="form-control" id="hallType" name="hallType" required>
+                                <option value="main-hall">Main Hall</option>
+                                <option value="vip-hall">VIP Hall</option>
+                                <option value="private-hall">Private Hall</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="hallId">Theater Hall</label>
-                            <select class="form-control" id="hallId" name="hallId" required>
-                                <option value="">Select Theater Hall</option>
-                                <?php // Reset hall results pointer if already fetched
-                                if ($halls->num_rows > 0) $halls->data_seek(0);
-                                while ($hall = $halls->fetch_assoc()): ?>
-                                    <option value="<?php echo htmlspecialchars($hall['hallID']); ?>">
-                                        <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
-                                    </option>
-                                <?php endwhile; ?>
-                            </select>
+                            <label for="totalSeats">Total Seats</label>
+                            <input type="number" class="form-control" id="totalSeats" name="totalSeats" required min="1">
                         </div>
                         <div class="form-group">
-                            <label for="showDate">Show Date</label>
-                            <input type="date" class="form-control" id="showDate" name="showDate" required min="<?php echo date('Y-m-d'); ?>">
-                        </div>
-                        <div class="form-group">
-                            <label for="showTime">Show Time</label>
-                            <input type="time" class="form-control" id="showTime" name="showTime" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="price">Ticket Price (₹)</label>
-                            <input type="number" step="0.01" class="form-control" id="price" name="price" required min="0">
-                        </div>
-                        <div class="form-group">
-                            <label for="status">Status</label>
-                            <select class="form-control" id="status" name="status" required>
+                            <label for="hallStatus">Status</label>
+                            <select class="form-control" id="hallStatus" name="hallStatus" required>
                                 <option value="active">Active</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="completed">Completed</option>
+                                <option value="inactive">Inactive</option>
                             </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="hallPanoramaImage">Hall Panorama Image (Optional)</label>
+                            <input type="file" class="form-control-file" id="hallPanoramaImage" name="hallPanoramaImage" onchange="previewHallPanorama(this, 'addHallPanoramaPreview')">
+                            <img id="addHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                            <small class="form-text text-muted">Upload a 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
-                        <button type="submit" name="add_schedule" class="btn btn-primary">Add Schedule</button>
+                        <button type="submit" name="add_hall" class="btn btn-primary">Add Hall</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Hall Modal -->
+    <div class="modal fade" id="editHallModal" tabindex="-1" role="dialog" aria-labelledby="editHallModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editHallModalLabel">Edit Hall</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <form action="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>" method="POST" enctype="multipart/form-data">
+                    <div class="modal-body">
+                        <input type="hidden" id="edit_hallId" name="edit_hallId">
+                        <input type="hidden" id="current_hall_panorama_img" name="current_hall_panorama_img">
+                        <div class="form-group">
+                            <label for="edit_hallName">Hall Name</label>
+                            <input type="text" class="form-control" id="edit_hallName" name="edit_hallName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_hallType">Hall Type</label>
+                            <select class="form-control" id="edit_hallType" name="edit_hallType" required>
+                                <option value="main-hall">Main Hall</option>
+                                <option value="vip-hall">VIP Hall</option>
+                                <option value="private-hall">Private Hall</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_totalSeats">Total Seats</label>
+                            <input type="number" class="form-control" id="edit_totalSeats" name="edit_totalSeats" required min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_hallStatus">Status</label>
+                            <select class="form-control" id="edit_hallStatus" name="edit_hallStatus" required>
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="editHallPanoramaImage">Hall Panorama Image (Optional)</label>
+                            <!-- Image preview for edit modal -->
+                            <img id="editHallPanoramaPreview" class="preview-image" style="display: none;" src="#" alt="Panorama Preview">
+                            <input type="file" class="form-control-file" id="editHallPanoramaImage" name="editHallPanoramaImage" onchange="previewHallPanorama(this, 'editHallPanoramaPreview')">
+                            <small class="form-text text-muted">Upload a new 360-degree panorama image for this hall (JPG, PNG, max 15MB).</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        <button type="submit" name="update_hall" class="btn btn-primary">Update Hall</button>
                     </div>
                 </form>
             </div>
@@ -581,5 +657,48 @@ $conn->close();
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        // Function to preview image for both add and edit modals
+        function previewHallPanorama(input, previewId) {
+            var preview = document.getElementById(previewId);
+            if (input.files && input.files[0]) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                }
+                reader.readAsDataURL(input.files[0]);
+            } else {
+                preview.style.display = 'none';
+                preview.src = '#'; // Clear src
+            }
+        }
+
+        // Fill edit modal with hall data
+        $('.edit-hall').click(function() {
+            var id = $(this).data('id');
+            var name = $(this).data('name');
+            var type = $(this).data('type');
+            var seats = $(this).data('seats');
+            var status = $(this).data('status');
+            var panorama = $(this).data('panorama'); // Get panorama path
+
+            $('#edit_hallId').val(id);
+            $('#edit_hallName').val(name);
+            $('#edit_hallType').val(type);
+            $('#edit_totalSeats').val(seats);
+            $('#edit_hallStatus').val(status);
+            $('#current_hall_panorama_img').val(panorama); // Set current panorama path in hidden field
+
+            var editPreview = document.getElementById('editHallPanoramaPreview');
+            if (panorama) {
+                editPreview.src = '../' + panorama; // Adjust path for display
+                editPreview.style.display = 'block';
+            } else {
+                editPreview.style.display = 'none';
+                editPreview.src = '#';
+            }
+        });
+    </script>
 </body>
 </html>

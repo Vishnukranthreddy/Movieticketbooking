@@ -3,19 +3,24 @@ session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Content Manager (roleID 3)
 if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 3)) {
-    header("Location: index.php");
+    header("Location: ../admin/index.php"); // Redirect to central admin login
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 // Handle movie deletion
@@ -25,38 +30,34 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $movieId = $_GET['delete'];
     
     // Check if the movie exists
-    $checkQuery = $conn->prepare("SELECT movieID FROM movietable WHERE movieID = ?");
-    $checkQuery->bind_param("i", $movieId);
-    $checkQuery->execute();
-    $result = $checkQuery->get_result();
+    // Ensure column names are lowercase
+    $checkQuery = "SELECT movieid FROM movietable WHERE movieid = $1";
+    $checkResult = pg_query_params($conn, $checkQuery, array($movieId));
     
-    if ($result->num_rows > 0) {
-        // IMPORTANT: Check for foreign key dependencies before deleting!
-        // E.g., check movie_schedules table
-        $checkSchedulesQuery = $conn->prepare("SELECT COUNT(*) as count FROM movie_schedules WHERE movieID = ?");
-        $checkSchedulesQuery->bind_param("i", $movieId);
-        $checkSchedulesQuery->execute();
-        $schedulesCount = $checkSchedulesQuery->get_result()->fetch_assoc()['count'];
-        $checkSchedulesQuery->close();
+    if ($checkResult && pg_num_rows($checkResult) > 0) {
+        // Check if movie is used in schedules
+        // Ensure column names are lowercase
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE movieid = $1";
+        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
+        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
         if ($schedulesCount > 0) {
-            $errorMessage = "Cannot delete movie. It is associated with $schedulesCount schedule(s). Delete schedules first.";
+            $errorMessage = "Cannot delete movie. It is associated with " . $schedulesCount . " schedule(s). Delete schedules first.";
         } else {
             // Delete the movie
-            $deleteQuery = $conn->prepare("DELETE FROM movietable WHERE movieID = ?");
-            $deleteQuery->bind_param("i", $movieId);
+            // Ensure column names are lowercase
+            $deleteQuery = "DELETE FROM movietable WHERE movieid = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
             
-            if ($deleteQuery->execute()) {
+            if ($deleteResult) {
                 $successMessage = "Movie deleted successfully!";
             } else {
-                $errorMessage = "Error deleting movie: " . $conn->error;
+                $errorMessage = "Error deleting movie: " . pg_last_error($conn);
             }
-            $deleteQuery->close();
         }
     } else {
         $errorMessage = "Movie not found!";
     }
-    $checkQuery->close();
 }
 
 // Get all movies with pagination
@@ -68,57 +69,44 @@ $offset = ($page - 1) * $recordsPerPage;
 $search = isset($_GET['search']) ? $_GET['search'] : '';
 $searchCondition = '';
 $params = [];
-$types = '';
+$param_index = 1;
 
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
-    $searchCondition = "WHERE movieTitle LIKE ? OR movieGenre LIKE ? OR movieDirector LIKE ?";
+    // Using ILIKE for case-insensitive search in PostgreSQL
+    // Ensure column names are lowercase
+    $searchCondition = "WHERE movietitle ILIKE $" . ($param_index++) . " OR moviegenre ILIKE $" . ($param_index++) . " OR moviedirector ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam, $searchParam];
-    $types = "sss";
 }
 
 // Count total records for pagination
-$countQuery = "SELECT COUNT(*) as total FROM movietable $searchCondition";
+$countQuery = "SELECT COUNT(*) as total FROM movietable " . $searchCondition;
 
-$stmtCount = $conn->prepare($countQuery);
-if (!empty($searchCondition)) {
-    $stmtCount->bind_param($types, ...$params);
+$stmtCountResult = pg_query_params($conn, $countQuery, $params);
+if (!$stmtCountResult) {
+    die("Error counting movies: " . pg_last_error($conn));
 }
-$stmtCount->execute();
-$totalRecords = $stmtCount->get_result()->fetch_assoc()['total'];
-$stmtCount->close();
-
+$totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get movies for current page
-$query = "SELECT m.*, l.locationName 
-          FROM movietable m 
-          LEFT JOIN locations l ON m.locationID = l.locationID 
-          $searchCondition 
-          ORDER BY m.movieID DESC 
-          LIMIT ?, ?";
+// Ensure column names are lowercase in the SELECT query
+$query = "
+    SELECT m.*, l.locationname 
+    FROM movietable m 
+    LEFT JOIN locations l ON m.locationid = l.locationid 
+    " . $searchCondition . " 
+    ORDER BY m.movieid DESC 
+    LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
-$stmt = $conn->prepare($query);
+$query_params = array_merge($params, [$recordsPerPage, $offset]);
+$movies = pg_query_params($conn, $query, $query_params);
 
-// Rebind parameters for the main query
-$query_params = $params; // Copy search parameters
-$query_types = $types; // Copy search types
-
-$query_params[] = $offset;
-$query_params[] = $recordsPerPage;
-$query_types .= "ii";
-
-if (!empty($searchCondition)) {
-    $stmt->bind_param($query_types, ...$query_params);
-} else {
-    $stmt->bind_param("ii", $offset, $recordsPerPage);
+if (!$movies) {
+    die("Error fetching movies: " . pg_last_error($conn));
 }
 
-$stmt->execute();
-$movies = $stmt->get_result();
-$stmt->close();
-
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -129,7 +117,7 @@ $conn->close();
     <title>Manage Movies - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
+    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Adjusted path -->
     <style>
         body {
             background-color: #f8f9fa;
@@ -232,7 +220,7 @@ $conn->close();
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -242,6 +230,9 @@ $conn->close();
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Content Management</span>
+                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -254,48 +245,68 @@ $conn->close();
                                 Movies
                             </a>
                         </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Content Manager sidebar ?>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Admin Functions (Super Admin)</span>
+                        </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="theaters.php">
-                                <i class="fas fa-building"></i>
-                                Theaters
+                            <a class="nav-link" href="../admin/dashboard.php">
+                                <i class="fas fa-home"></i>
+                                Super Admin Dashboard
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
-                                <i class="fas fa-map-marker-alt"></i>
-                                Locations
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="schedules.php">
-                                <i class="fas fa-calendar-alt"></i>
-                                Schedules
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="bookings.php">
-                                <i class="fas fa-ticket-alt"></i>
-                                Bookings
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="users.php">
+                            <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
                                 Users
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="reports.php">
-                                <i class="fas fa-chart-bar"></i>
-                                Reports
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="settings.php">
+                            <a class="nav-link" href="../admin/settings.php">
                                 <i class="fas fa-cog"></i>
                                 Settings
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
+                            </a>
+                        </li>
+                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                            <span>Theater Management (Super Admin)</span>
+                        </h6>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/theaters.php">
+                                <i class="fas fa-building"></i>
+                                Theaters
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/locations.php">
+                                <i class="fas fa-map-marker-alt"></i>
+                                Locations
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/schedules.php">
+                                <i class="fas fa-calendar-alt"></i>
+                                Schedules
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/bookings.php">
+                                <i class="fas fa-ticket-alt"></i>
+                                Bookings
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../theater_manager/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Theater Reports
+                            </a>
+                        </li>
+                        <?php endif; ?>
                     </ul>
                 </div>
             </nav>
@@ -360,26 +371,29 @@ $conn->close();
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php if ($movies->num_rows > 0): ?>
-                                    <?php while ($movie = $movies->fetch_assoc()): ?>
+                                <?php if (pg_num_rows($movies) > 0): ?>
+                                    <?php while ($movie = pg_fetch_assoc($movies)): 
+                                        // Ensure fetched keys are lowercase for consistency
+                                        $movie = array_change_key_case($movie, CASE_LOWER);
+                                    ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
                                             <td>
-                                                <img src="<?php echo '../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image">
+                                                <img src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image">
                                             </td>
-                                            <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
-                                            <td><?php echo htmlspecialchars($movie['movieRelDate']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
+                                            <td><?php echo htmlspecialchars($movie['moviereldate']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="movies.php?delete=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules and bookings!')">
+                                                <a href="movies.php?delete=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
-                                                <a href="../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-info" target="_blank">
+                                                <a href="../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-info" target="_blank">
                                                     <i class="fas fa-eye"></i>
                                                 </a>
                                             </td>

@@ -7,15 +7,20 @@ if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION[
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $theaterId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -25,16 +30,15 @@ $successMessage = '';
 
 if ($theaterId > 0) {
     // Fetch current theater details
-    $stmt = $conn->prepare("SELECT * FROM theaters WHERE theaterID = ?");
-    $stmt->bind_param("i", $theaterId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    if ($result->num_rows > 0) {
-        $theater = $result->fetch_assoc();
+    $stmtQuery = "SELECT * FROM theaters WHERE theaterid = $1";
+    $stmtResult = pg_query_params($conn, $stmtQuery, array($theaterId));
+    if ($stmtResult && pg_num_rows($stmtResult) > 0) {
+        $theater = pg_fetch_assoc($stmtResult);
+        // Convert keys to lowercase for consistency with PostgreSQL's default behavior
+        $theater = array_change_key_case($theater, CASE_LOWER);
     } else {
         $errorMessage = "Theater not found.";
     }
-    $stmt->close();
 } else {
     $errorMessage = "Invalid theater ID provided.";
 }
@@ -53,26 +57,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_theater'])) {
         $theaterEmail = $_POST['theaterEmail'];
         $theaterStatus = $_POST['theaterStatus'];
 
-        $updateStmt = $conn->prepare("UPDATE theaters SET theaterName = ?, theaterAddress = ?, theaterCity = ?, theaterState = ?, theaterZipcode = ?, theaterPhone = ?, theaterEmail = ?, theaterStatus = ? WHERE theaterID = ?");
-        $updateStmt->bind_param("ssssssssi", $theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterId);
+        $updateQuery = "UPDATE theaters SET theatername = $1, theateraddress = $2, theatercity = $3, theaterstate = $4, theaterzipcode = $5, theaterphone = $6, theateremail = $7, theaterstatus = $8 WHERE theaterid = $9";
+        $updateResult = pg_query_params($conn, $updateQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterId));
 
-        if ($updateStmt->execute()) {
+        if ($updateResult) {
             $successMessage = "Theater updated successfully!";
             // Refresh theater data after update
-            $stmt = $conn->prepare("SELECT * FROM theaters WHERE theaterID = ?");
-            $stmt->bind_param("i", $theaterId);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $theater = $result->fetch_assoc(); // Update $theater variable with new data
-            $stmt->close();
+            $stmtQuery = "SELECT * FROM theaters WHERE theaterid = $1";
+            $stmtResult = pg_query_params($conn, $stmtQuery, array($theaterId));
+            $theater = pg_fetch_assoc($stmtResult); // Update $theater variable with new data
+            $theater = array_change_key_case($theater, CASE_LOWER);
         } else {
-            $errorMessage = "Error updating theater: " . $updateStmt->error;
+            $errorMessage = "Error updating theater: " . pg_last_error($conn);
         }
-        $updateStmt->close();
     }
 }
 
-$conn->close();
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>
@@ -260,7 +261,7 @@ $conn->close();
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Edit Theater: <?php echo htmlspecialchars($theater['theaterName'] ?? 'N/A'); ?></h1>
+                    <h1>Edit Theater: <?php echo htmlspecialchars($theater['theatername'] ?? 'N/A'); ?></h1>
                     <a href="theaters.php" class="btn btn-secondary">
                         <i class="fas fa-arrow-left"></i> Back to Theaters
                     </a>
@@ -287,51 +288,51 @@ $conn->close();
                 <?php if ($theater): ?>
                     <div class="form-container">
                         <form action="" method="POST">
-                            <input type="hidden" name="theaterID" value="<?php echo htmlspecialchars($theater['theaterID']); ?>">
+                            <input type="hidden" name="theaterID" value="<?php echo htmlspecialchars($theater['theaterid']); ?>">
                             <div class="row">
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="theaterName">Theater Name</label>
-                                        <input type="text" class="form-control" id="theaterName" name="theaterName" value="<?php echo htmlspecialchars($theater['theaterName']); ?>" required>
+                                        <input type="text" class="form-control" id="theaterName" name="theaterName" value="<?php echo htmlspecialchars($theater['theatername']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="theaterAddress">Address</label>
-                                        <input type="text" class="form-control" id="theaterAddress" name="theaterAddress" value="<?php echo htmlspecialchars($theater['theaterAddress']); ?>" required>
+                                        <input type="text" class="form-control" id="theaterAddress" name="theaterAddress" value="<?php echo htmlspecialchars($theater['theateraddress']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="theaterCity">City</label>
-                                        <input type="text" class="form-control" id="theaterCity" name="theaterCity" value="<?php echo htmlspecialchars($theater['theaterCity']); ?>" required>
+                                        <input type="text" class="form-control" id="theaterCity" name="theaterCity" value="<?php echo htmlspecialchars($theater['theatercity']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="theaterState">State</label>
-                                        <input type="text" class="form-control" id="theaterState" name="theaterState" value="<?php echo htmlspecialchars($theater['theaterState']); ?>" required>
+                                        <input type="text" class="form-control" id="theaterState" name="theaterState" value="<?php echo htmlspecialchars($theater['theaterstate']); ?>" required>
                                     </div>
                                 </div>
                                 
                                 <div class="col-md-6">
                                     <div class="form-group">
                                         <label for="theaterZipcode">Zipcode</label>
-                                        <input type="text" class="form-control" id="theaterZipcode" name="theaterZipcode" value="<?php echo htmlspecialchars($theater['theaterZipcode']); ?>">
+                                        <input type="text" class="form-control" id="theaterZipcode" name="theaterZipcode" value="<?php echo htmlspecialchars($theater['theaterzipcode']); ?>">
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="theaterPhone">Phone</label>
-                                        <input type="text" class="form-control" id="theaterPhone" name="theaterPhone" value="<?php echo htmlspecialchars($theater['theaterPhone']); ?>" required>
+                                        <input type="text" class="form-control" id="theaterPhone" name="theaterPhone" value="<?php echo htmlspecialchars($theater['theaterphone']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="theaterEmail">Email</label>
-                                        <input type="email" class="form-control" id="theaterEmail" name="theaterEmail" value="<?php echo htmlspecialchars($theater['theaterEmail']); ?>" required>
+                                        <input type="email" class="form-control" id="theaterEmail" name="theaterEmail" value="<?php echo htmlspecialchars($theater['theateremail']); ?>" required>
                                     </div>
                                     
                                     <div class="form-group">
                                         <label for="theaterStatus">Status</label>
                                         <select class="form-control" id="theaterStatus" name="theaterStatus" required>
-                                            <option value="active" <?php echo ($theater['theaterStatus'] == 'active') ? 'selected' : ''; ?>>Active</option>
-                                            <option value="inactive" <?php echo ($theater['theaterStatus'] == 'inactive') ? 'selected' : ''; ?>>Inactive</option>
+                                            <option value="active" <?php echo ($theater['theaterstatus'] == 'active') ? 'selected' : ''; ?>>Active</option>
+                                            <option value="inactive" <?php echo ($theater['theaterstatus'] == 'inactive') ? 'selected' : ''; ?>>Inactive</option>
                                         </select>
                                     </div>
                                 </div>

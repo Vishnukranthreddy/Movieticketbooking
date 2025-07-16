@@ -7,15 +7,20 @@ if (isset($_SESSION['user_id'])) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db";
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $error = "";
@@ -31,44 +36,47 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $input_username = $_POST["username"];
     $input_password = $_POST["password"];
 
-    // Use prepared statements to prevent SQL injection
+    // Use pg_query_params for prepared statements to prevent SQL injection
     // Note: Assuming plain text passwords based on provided movie_db.sql.
     // In a real application, always hash passwords using password_hash() and verify with password_verify().
-    $query = $conn->prepare("SELECT id, username, name, password, phone FROM users WHERE username = ? LIMIT 1");
-    $query->bind_param("s", $input_username);
-    $query->execute();
-    $result = $query->get_result();
+    $query = "SELECT id, username, name, password, phone FROM users WHERE username = $1 LIMIT 1";
+    $result = pg_query_params($conn, $query, array($input_username));
 
-    if ($result->num_rows > 0) {
-        $user = $result->fetch_assoc();
-        // Direct comparison for plain text passwords as seen in movie_db.sql
-        if ($input_password === $user['password']) { // DIRECT COMPARISON FOR PLAIN TEXT PASSWORDS
-            // Set session variables
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['user_username'] = $user['username'];
-            $_SESSION['user_name'] = $user['name'];
-            $_SESSION['user_phone'] = $user['phone']; // Assuming 'phone' column exists and is fetched
-            $_SESSION['user_email'] = $user['username']; // Assuming username is email or used as email for booking
+    if ($result) {
+        if (pg_num_rows($result) > 0) {
+            $user = pg_fetch_assoc($result);
+            // Direct comparison for plain text passwords as seen in movie_db.sql
+            // Note: PostgreSQL column names are typically lowercase by default
+            if ($input_password === $user['password']) { // DIRECT COMPARISON FOR PLAIN TEXT PASSWORDS
+                // Set session variables
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_username'] = $user['username'];
+                $_SESSION['user_name'] = $user['name'];
+                $_SESSION['user_phone'] = $user['phone']; // Assuming 'phone' column exists and is fetched
+                $_SESSION['user_email'] = $user['username']; // Assuming username is email or used as email for booking
 
-            // Redirect to the original page if available, otherwise to profile
-            if (isset($_SESSION['redirect_after_login'])) {
-                $redirect_url = $_SESSION['redirect_after_login'];
-                unset($_SESSION['redirect_after_login']); // Clear the redirect URL
-                header("Location: " . $redirect_url);
+                // Redirect to the original page if available, otherwise to profile
+                if (isset($_SESSION['redirect_after_login'])) {
+                    $redirect_url = $_SESSION['redirect_after_login'];
+                    unset($_SESSION['redirect_after_login']); // Clear the redirect URL
+                    header("Location: " . $redirect_url);
+                } else {
+                    header("Location: profile.php");
+                }
+                exit();
             } else {
-                header("Location: profile.php");
+                $error = "Invalid username or password.";
             }
-            exit();
         } else {
             $error = "Invalid username or password.";
         }
     } else {
-        $error = "Invalid username or password.";
+        $error = "Database query failed: " . pg_last_error($conn);
     }
-    $query->close();
 }
 
-$conn->close();
+// Close PostgreSQL connection
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>

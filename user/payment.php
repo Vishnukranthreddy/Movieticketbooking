@@ -7,15 +7,20 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-// Database connection
-$host = "localhost";
-$username = "root";
-$password = "";
-$database = "movie_db"; // Ensured to be movie_db
-$conn = new mysqli($host, $username, $password, $database);
+// Database connection details for PostgreSQL
+$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
+$username = "showtime_select_user";
+$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
+$database = "showtime_select";
+$port = "5432";
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+// Construct the connection string
+$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+// Establish PostgreSQL connection
+$conn = pg_connect($conn_string);
+
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 }
 
 $bookingData = $_SESSION['booking_data'] ?? null;
@@ -58,43 +63,51 @@ if ($bookingData) {
         $checksumHash = "SIMULATED_CHECKSUM"; // Dummy Checksum
 
         // 1. Insert into payment table
-        $paymentInsertStmt = $conn->prepare("
+        // Use pg_query_params for prepared statements
+        $paymentInsertQuery = "
             INSERT INTO payment
             (ORDERID, MID, TXNID, TXNAMOUNT, PAYMENTMODE, CURRENCY, TXNDATE, STATUS, RESPCODE, RESPMSG, GATEWAYNAME, BANKTXNID, BANKNAME, CHECKSUMHASH)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $paymentInsertStmt->bind_param(
-            "ssssssssssssss",
-            $orderID, $mid, $txnID, $txnAmount, $paymentMode, $currency, $txnDate, $status, $respCode, $respMsg, $gatewayName, $bankTxnID, $bankName, $checksumHash
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ";
+        $paymentInsertResult = pg_query_params(
+            $conn,
+            $paymentInsertQuery,
+            array($orderID, $mid, $txnID, $txnAmount, $paymentMode, $currency, $txnDate, $status, $respCode, $respMsg, $gatewayName, $bankTxnID, $bankName, $checksumHash)
         );
 
-        if ($paymentInsertStmt->execute()) {
+        if ($paymentInsertResult) {
             // Payment record inserted successfully, now insert the booking
-            $stmt = $conn->prepare("
+            // Use RETURNING bookingID to get the newly generated bookingID
+            $bookingInsertQuery = "
                 INSERT INTO bookingtable
                 (movieID, scheduleID, hallID, bookingTheatre, bookingType, bookingDate, bookingTime, bookingFName, bookingLName, bookingPNumber, bookingEmail, ORDERID, seats, amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->bind_param(
-                "iiissssssssssd",
-                $bookingData['movieID'],
-                $bookingData['scheduleID'],
-                $bookingData['hallID'],
-                $bookingData['bookingTheatre'],
-                $bookingData['bookingType'],
-                $bookingData['bookingDate'],
-                $bookingData['bookingTime'],
-                $bookingData['bookingFName'],
-                $bookingData['bookingLName'],
-                $bookingData['bookingPNumber'],
-                $bookingData['bookingEmail'],
-                $bookingData['ORDERID'], // Use the same ORDERID
-                $bookingData['seats'],
-                $bookingData['amount']
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                RETURNING bookingID
+            ";
+            $bookingInsertResult = pg_query_params(
+                $conn,
+                $bookingInsertQuery,
+                array(
+                    $bookingData['movieID'],
+                    $bookingData['scheduleID'],
+                    $bookingData['hallID'],
+                    $bookingData['bookingTheatre'],
+                    $bookingData['bookingType'],
+                    $bookingData['bookingDate'],
+                    $bookingData['bookingTime'],
+                    $bookingData['bookingFName'],
+                    $bookingData['bookingLName'],
+                    $bookingData['bookingPNumber'],
+                    $bookingData['bookingEmail'],
+                    $bookingData['ORDERID'], // Use the same ORDERID
+                    $bookingData['seats'],
+                    $bookingData['amount']
+                )
             );
 
-            if ($stmt->execute()) {
-                $bookingID = $conn->insert_id;
+            if ($bookingInsertResult) {
+                $bookingRow = pg_fetch_assoc($bookingInsertResult);
+                $bookingID = $bookingRow['bookingid']; // Get the returned bookingID
                 // Clear session data after successful booking
                 unset($_SESSION['booking_data']);
                 header("Location: booking_confirmation.php?booking_id=" . $bookingID);
@@ -102,15 +115,13 @@ if ($bookingData) {
             } else {
                 // If booking fails, you might want to consider rolling back the payment record
                 // For simplicity here, we'll just report the error.
-                $errorMessage = "Failed to record booking in the database: " . $stmt->error;
+                $errorMessage = "Failed to record booking in the database: " . pg_last_error($conn);
                 $paymentStatus = 'failed';
             }
-            $stmt->close();
         } else {
-            $errorMessage = "Failed to record payment details in the database: " . $paymentInsertStmt->error;
+            $errorMessage = "Failed to record payment details in the database: " . pg_last_error($conn);
             $paymentStatus = 'failed';
         }
-        $paymentInsertStmt->close();
 
     } else {
         $errorMessage = "Payment gateway declined the transaction (simulated).";
@@ -119,7 +130,8 @@ if ($bookingData) {
     $errorMessage = "No booking data found for payment. Please start a new booking from the movie details page.";
 }
 
-$conn->close();
+// Close PostgreSQL connection
+pg_close($conn);
 ?>
 
 <!DOCTYPE html>

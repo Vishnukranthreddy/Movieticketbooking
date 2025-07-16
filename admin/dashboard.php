@@ -33,16 +33,16 @@ $scheduleCount = pg_fetch_assoc(pg_query($conn, "SELECT COUNT(*) as count FROM m
 
 // Get recent bookings (more comprehensive join)
 $recentBookingsQuery = "
-    SELECT b.bookingid, b.bookingfname, b.bookinglname, b.bookingemail, b.bookingpnumber, b.seats, b.amount,
-           m.movietitle, m.movieimg,
-           ms.showdate, ms.showtime,
-           t.theatername, h.hallname
+    SELECT b.\"bookingID\", b.\"bookingFName\", b.\"bookingLName\", b.\"bookingEmail\", b.\"bookingPNumber\", b.seats, b.amount,
+           m.\"movieTitle\", m.\"movieImg\",
+           ms.\"showDate\", ms.\"showTime\",
+           t.\"theaterName\", h.\"hallName\"
     FROM bookingtable b
-    LEFT JOIN movietable m ON b.movieid = m.movieid
-    LEFT JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
-    LEFT JOIN theater_halls h ON b.hallid = h.hallid
-    LEFT JOIN theaters t ON h.theaterid = t.theaterid
-    ORDER BY b.bookingid DESC LIMIT 5
+    LEFT JOIN movietable m ON b.\"movieID\" = m.\"movieID\"
+    LEFT JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
+    LEFT JOIN theater_halls h ON b.\"hallID\" = h.\"hallID\"
+    LEFT JOIN theaters t ON h.\"theaterID\" = t.\"theaterID\"
+    ORDER BY b.\"bookingID\" DESC LIMIT 5
 ";
 $recentBookings = pg_query($conn, $recentBookingsQuery);
 if (!$recentBookings) {
@@ -51,10 +51,10 @@ if (!$recentBookings) {
 
 // Get recent movies
 $recentMoviesQuery = "
-    SELECT m.movieid, m.movietitle, m.moviegenre, m.movieduration, m.movieimg, l.locationname
+    SELECT m.\"movieID\", m.\"movieTitle\", m.\"movieGenre\", m.\"movieDuration\", m.\"movieImg\", l.\"locationName\"
     FROM movietable m
-    LEFT JOIN locations l ON m.locationid = l.locationid
-    ORDER BY m.movieid DESC LIMIT 5
+    LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\"
+    ORDER BY m.\"movieID\" DESC LIMIT 5
 ";
 $recentMovies = pg_query($conn, $recentMoviesQuery);
 if (!$recentMovies) {
@@ -403,11 +403,11 @@ pg_close($conn);
                                         <?php if (pg_num_rows($recentBookings) > 0): ?>
                                             <?php while ($booking = pg_fetch_assoc($recentBookings)): ?>
                                                 <tr>
-                                                    <td><?php echo htmlspecialchars($booking['bookingid']); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['movietitle'] ?? 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['bookingfname'] . ' ' . $booking['bookinglname']); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['showdate'] ? date('Y-m-d', strtotime($booking['showdate'])) : 'N/A'); ?></td>
-                                                    <td><?php echo htmlspecialchars($booking['showtime'] ? date('H:i', strtotime($booking['showtime'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['bookingID']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['movieTitle'] ?? 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['bookingFName'] . ' ' . $booking['bookingLName']); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showDate'] ? date('Y-m-d', strtotime($booking['showDate'])) : 'N/A'); ?></td>
+                                                    <td><?php echo htmlspecialchars($booking['showTime'] ? date('H:i', strtotime($booking['showTime'])) : 'N/A'); ?></td>
                                                     <td>₹<?php echo number_format($booking['amount'] ?? 0, 2); ?></td>
                                                 </tr>
                                             <?php endwhile; ?>
@@ -440,12 +440,13 @@ pg_close($conn);
                                         <?php if (pg_num_rows($recentMovies) > 0): ?>
                                             <?php while ($movie = pg_fetch_assoc($recentMovies)): ?>
                                                 <tr>
-                                                    <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                                     <td>
-                                                        <img src="<?php echo '../' . htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image-mini">
+                                                        <img src="<?php echo '../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image-mini">
                                                     </td>
-                                                    <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
-                                                    <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
+                                                    <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
                                                 </tr>
                                             <?php endwhile; ?>
                                         <?php else: ?>

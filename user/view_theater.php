@@ -43,26 +43,26 @@ if (isset($_GET['hall_panorama_img']) && !empty($_GET['hall_panorama_img'])) {
     $theaterId = $_GET['theater_id'];
 
     // Fetch theater details including the main theater panorama image path
-    $query = "SELECT \"theaterName\", \"theaterPanoramaImg\" FROM theaters WHERE \"theaterID\" = $1";
+    $query = "SELECT theatername, theaterpanoramaimg FROM theaters WHERE theaterid = $1";
     $result = pg_query_params($conn, $query, array($theaterId));
     
     if ($result) {
         if (pg_num_rows($result) > 0) {
             $theaterData = pg_fetch_assoc($result);
             // PostgreSQL column names are case-sensitive if double-quoted, otherwise lowercase.
-            // Assuming they are stored as 'theaterName' and 'theaterPanoramaImg' in the database.
-            $displayName = $theaterData['theaterName'];
-            if (!empty($theaterData['theaterPanoramaImg'])) {
+            // Using lowercase column names to match the database schema.
+            $displayName = $theaterData['theatername'];
+            if (!empty($theaterData['theaterpanoramaimg'])) {
                 // Basic validation of the path (ensure it starts with 'img/')
-                if (strpos($theaterData['theaterPanoramaImg'], 'img/') === 0) {
-                    $panoramaSource = '../' . htmlspecialchars($theaterData['theaterPanoramaImg']);
+                if (strpos($theaterData['theaterpanoramaimg'], 'img/') === 0) {
+                    $panoramaSource = '../' . htmlspecialchars($theaterData['theaterpanoramaimg']);
                     $sourceType = 'theater';
                 } else {
                     $errorMessage = "Invalid theater panorama image path stored in database.";
                     $sourceType = 'error';
                 }
             } else {
-                $errorMessage = "No panorama image explicitly set for " . htmlspecialchars($theaterData['theaterName']) . ".";
+                $errorMessage = "No panorama image explicitly set for " . htmlspecialchars($theaterData['theatername']) . ".";
                 $sourceType = 'none'; // No panorama data
             }
         } else {

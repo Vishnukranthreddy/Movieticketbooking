@@ -9,7 +9,7 @@ $database = "showtime_select";
 $port = "5432";
 
 // Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$database} user={$username} password={$password} sslmode=require";
+$conn_string = "host={$host} port={$port} dbname={$dbname} user={$username} password={$password}";
 
 // Establish PostgreSQL connection
 $conn = pg_connect($conn_string);
@@ -26,24 +26,17 @@ $featuredMoviesQuery = "
     ORDER BY m.movieRelDate DESC, m.movieTitle ASC
     LIMIT 6
 ";
-$featuredMovies = pg_query($conn, $featuredMoviesQuery);
+$featuredMovies = $conn->query($featuredMoviesQuery);
 
 // Check if the movie query failed
 if ($featuredMovies === false) {
-    die("Featured Movies Query failed: " . pg_last_error($conn) . "<br>SQL: " . htmlspecialchars($featuredMoviesQuery));
+    die("Featured Movies Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($featuredMoviesQuery));
 }
 
 // Get total movies count
 $totalMoviesQuery = "SELECT COUNT(*) as total FROM movietable";
-$totalMoviesResult = pg_query($conn, $totalMoviesQuery);
-$totalMovies = 0; // Default to 0
-if ($totalMoviesResult) {
-    $totalMovies = pg_fetch_assoc($totalMoviesResult)['total'];
-} else {
-    // Log error or handle it appropriately, but don't die on a count query
-    error_log("Total Movies Query failed: " . pg_last_error($conn));
-}
-
+$totalMoviesResult = $conn->query($totalMoviesQuery);
+$totalMovies = $totalMoviesResult->fetch_assoc()['total'];
 
 // Query for "Our Theaters" section
 // Fetch all active theaters, including their panorama image path
@@ -57,15 +50,14 @@ $theatersQuery = "
     WHERE theaterStatus = 'active'
     ORDER BY theaterName ASC
 ";
-$theaters = pg_query($conn, $theatersQuery);
+$theaters = $conn->query($theatersQuery);
 
 // Check if the theater query failed
 if ($theaters === false) {
-    die("Theater Query failed: " . pg_last_error($conn) . "<br>SQL: " . htmlspecialchars($theatersQuery));
+    die("Theater Query failed: " . $conn->error . "<br>SQL: " . htmlspecialchars($theatersQuery));
 }
 
-// Close PostgreSQL connection
-pg_close($conn);
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -307,19 +299,19 @@ pg_close($conn);
     </section>
 
     <!-- Featured Movies Section -->
-    <?php if ($featuredMovies && pg_num_rows($featuredMovies) > 0): ?>
+    <?php if ($featuredMovies->num_rows > 0): ?>
     <section class="py-16">
         <div class="container mx-auto px-4">
             <h2 class="text-3xl font-bold text-center text-white mb-12">Featured Movies</h2>
             <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                <?php while ($movie = pg_fetch_assoc($featuredMovies)): ?>
+                <?php while ($movie = $featuredMovies->fetch_assoc()): ?>
                     <div class="card">
-                        <img src="<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="card-image">
+                        <img src="<?php echo htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/300x450/cccccc/333333?text=No+Movie+Image';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="card-image">
                         <div class="p-6">
-                            <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($movie['movietitle']); ?></h3>
-                            <p class="text-sm text-gray-400 mb-1"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['moviegenre']); ?></p>
-                            <p class="text-sm text-gray-400 mb-4"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieduration']); ?> min</p>
-                            <a href="user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn-primary block text-center">View Details</a>
+                            <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($movie['movieTitle']); ?></h3>
+                            <p class="text-sm text-gray-400 mb-1"><strong>Genre:</strong> <?php echo htmlspecialchars($movie['movieGenre']); ?></p>
+                            <p class="text-sm text-gray-400 mb-4"><strong>Duration:</strong> <?php echo htmlspecialchars($movie['movieDuration']); ?> min</p>
+                            <a href="user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn-primary block text-center">View Details</a>
                         </div>
                     </div>
                 <?php endwhile; ?>
@@ -332,21 +324,21 @@ pg_close($conn);
     <?php endif; ?>
 
     <!-- Our Theaters Section -->
-    <?php if ($theaters && pg_num_rows($theaters) > 0): ?>
+    <?php if ($theaters->num_rows > 0): ?>
     <section class="py-16">
         <div class="container mx-auto px-4">
             <h2 class="text-3xl font-bold text-center text-white mb-12">Our Theaters</h2>
             <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-                <?php while ($theater = pg_fetch_assoc($theaters)): ?>
+                <?php while ($theater = $theaters->fetch_assoc()): ?>
                     <div class="theater-card">
-                        <img src="<?php echo htmlspecialchars($theater['theaterpanoramimg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theatername']); ?>" class="theater-card-image">
+                        <img src="<?php echo htmlspecialchars($theater['theaterPanoramaImg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theaterName']); ?>" class="theater-card-image">
                         <div class="p-6">
-                            <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($theater['theatername']); ?></h3>
-                            <p class="text-sm text-gray-400 mb-4"><strong>City:</strong> <?php echo htmlspecialchars($theater['theatercity'] ?? 'N/A'); ?></p>
+                            <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($theater['theaterName']); ?></h3>
+                            <p class="text-sm text-gray-400 mb-4"><strong>City:</strong> <?php echo htmlspecialchars($theater['theaterCity'] ?? 'N/A'); ?></p>
                         </div>
                         <div class="card-buttons">
-                            <?php if (!empty($theater['theaterpanoramimg'])): ?>
-                                <a href="user/view_theater.php?theater_id=<?php echo htmlspecialchars($theater['theaterid']); ?>" class="btn-primary">View Theater</a>
+                            <?php if (!empty($theater['theaterPanoramaImg'])): ?>
+                                <a href="user/view_theater.php?theater_id=<?php echo htmlspecialchars($theater['theaterID']); ?>" class="btn-primary">View Theater</a>
                             <?php else: ?>
                                 <span class="btn-secondary-custom opacity-50 cursor-not-allowed">No Panorama</span>
                             <?php endif; ?>
@@ -405,7 +397,7 @@ pg_close($conn);
                 </div>
             </div>
             <hr class="border-gray-600 my-8">
-    
+   
             <div class="container mx-auto text-center px-4">
                 <p>&copy; <?php echo date('Y'); ?> Showtime Select. All rights reserved.</p>
                 <p class="text-sm">Designed for educational purpose </p>

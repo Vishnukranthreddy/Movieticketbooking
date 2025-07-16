@@ -24,12 +24,13 @@ if (!$conn) {
 }
 
 // Fetch all data for reports
+// Corrected column name from movieID to movieid based on error message
 $revenueByMovieQuery = "
-    SELECT m.\"movieID\", m.\"movieTitle\", COUNT(b.\"bookingID\") as bookingCount, SUM(b.amount) as totalRevenue
+    SELECT m.movieid, m.movietitle, COUNT(b.bookingid) as bookingcount, SUM(b.amount) as totalrevenue
     FROM movietable m
-    LEFT JOIN bookingtable b ON m.\"movieID\" = b.\"movieID\"
-    GROUP BY m.\"movieID\", m.\"movieTitle\"
-    ORDER BY totalRevenue DESC
+    LEFT JOIN bookingtable b ON m.movieid = b.movieid
+    GROUP BY m.movieid, m.movietitle
+    ORDER BY totalrevenue DESC
     LIMIT 10
 ";
 $revenueByMovieResult = pg_query($conn, $revenueByMovieQuery);
@@ -38,13 +39,13 @@ if (!$revenueByMovieResult) {
 }
 
 $revenueByDateQuery = "
-    SELECT TO_CHAR(ms.\"showDate\", 'YYYY-MM-DD') as showDateFormatted,
-           COUNT(b.\"bookingID\") as bookingCount,
-           SUM(b.amount) as dailyRevenue
+    SELECT TO_CHAR(ms.showdate, 'YYYY-MM-DD') as showdateformatted,
+           COUNT(b.bookingid) as bookingcount,
+           SUM(b.amount) as dailyrevenue
     FROM bookingtable b
-    JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
-    GROUP BY showDateFormatted
-    ORDER BY showDateFormatted DESC
+    JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
+    GROUP BY showdateformatted
+    ORDER BY showdateformatted DESC
     LIMIT 30
 ";
 $revenueByDateResult = pg_query($conn, $revenueByDateQuery);
@@ -53,10 +54,10 @@ if (!$revenueByDateResult) {
 }
 
 $revenueByTheaterQuery = "
-    SELECT b.\"bookingTheatre\", COUNT(b.\"bookingID\") as bookingCount, SUM(b.amount) as totalRevenue
+    SELECT b.bookingtheatre, COUNT(b.bookingid) as bookingcount, SUM(b.amount) as totalrevenue
     FROM bookingtable b
-    GROUP BY b.\"bookingTheatre\"
-    ORDER BY totalRevenue DESC
+    GROUP BY b.bookingtheatre
+    ORDER BY totalrevenue DESC
 ";
 $revenueByTheaterResult = pg_query($conn, $revenueByTheaterQuery);
 if (!$revenueByTheaterResult) {
@@ -64,11 +65,11 @@ if (!$revenueByTheaterResult) {
 }
 
 $popularTimesQuery = "
-    SELECT ms.\"showTime\", COUNT(b.\"bookingID\") as bookingCount
+    SELECT ms.showtime, COUNT(b.bookingid) as bookingcount
     FROM bookingtable b
-    JOIN movie_schedules ms ON b.\"scheduleID\" = ms.\"scheduleID\"
-    GROUP BY ms.\"showTime\"
-    ORDER BY bookingCount DESC
+    JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
+    GROUP BY ms.showtime
+    ORDER BY bookingcount DESC
     LIMIT 10
 ";
 $popularTimesResult = pg_query($conn, $popularTimesQuery);
@@ -77,10 +78,10 @@ if (!$popularTimesResult) {
 }
 
 // Total revenue and bookings
-$totalRevenueQuery = "SELECT SUM(amount) as totalRevenue FROM bookingtable";
+$totalRevenueQuery = "SELECT SUM(amount) as totalrevenue FROM bookingtable";
 $totalRevenue = pg_fetch_assoc(pg_query($conn, $totalRevenueQuery))['totalrevenue'] ?? 0;
 
-$totalBookingsQuery = "SELECT COUNT(*) as totalBookings FROM bookingtable";
+$totalBookingsQuery = "SELECT COUNT(*) as totalbookings FROM bookingtable";
 $totalBookings = pg_fetch_assoc(pg_query($conn, $totalBookingsQuery))['totalbookings'] ?? 0;
 $avgRevenue = $totalBookings > 0 ? $totalRevenue / $totalBookings : 0;
 
@@ -340,8 +341,7 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link active" href="reports.php"> <!-- This is the reports page itself for TM -->
-                                <i class="fas fa-chart-bar"></i>
+                            <a class="nav-link active" href="reports.php"> <i class="fas fa-chart-bar"></i>
                                 Reports
                             </a>
                         </li>
@@ -368,8 +368,7 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../admin/reports.php"> <!-- Super Admin's comprehensive reports -->
-                                <i class="fas fa-chart-bar"></i>
+                            <a class="nav-link" href="../admin/reports.php"> <i class="fas fa-chart-bar"></i>
                                 All Reports
                             </a>
                         </li>
@@ -441,7 +440,7 @@ pg_close($conn);
                                     <tr>
                                         <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
                                         <td><?php echo htmlspecialchars($movie['bookingcount']); ?></td>
-                                        <td>₹<?php echo number_format($movie['totalrevenue'], 2); ?></td>
+                                        <td>₹<?php echo number_format($movie['totalrevenue'] ?? 0, 2); ?></td>
                                     </tr>
                                 <?php endwhile; ?>
                             </tbody>
@@ -482,7 +481,7 @@ pg_close($conn);
                                             <tr>
                                                 <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingtheatre']))); ?></td>
                                                 <td><?php echo htmlspecialchars($theater['bookingcount']); ?></td>
-                                                <td>₹<?php echo number_format($theater['totalrevenue'], 2); ?></td>
+                                                <td>₹<?php echo number_format($theater['totalrevenue'] ?? 0, 2); ?></td>
                                             </tr>
                                         <?php endwhile; ?>
                                     </tbody>

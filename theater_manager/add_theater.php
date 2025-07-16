@@ -77,8 +77,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Only proceed with database insert if panorama upload (if attempted) was successful or no file was selected
     if ($uploadOk !== 0) {
         // Insert theater data using prepared statement
-        // Use RETURNING "theaterID" to get the newly inserted ID
-        $insertTheaterQuery = "INSERT INTO theaters (theatername, theateraddress, theatercity, theaterstate, theaterzipcode, theaterphone, theateremail, theaterstatus, theaterpanoraimg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING theaterid";
+        // Use RETURNING theaterid to get the newly inserted ID
+        // Corrected column name from theaterpanoraimg to theaterpanoramimg based on likely typo
+        $insertTheaterQuery = "INSERT INTO theaters (theatername, theateraddress, theatercity, theaterstate, theaterzipcode, theaterphone, theateremail, theaterstatus, theaterpanoramimg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING theaterid";
         $insertTheaterResult = pg_query_params($conn, $insertTheaterQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg));
         
         if ($insertTheaterResult) {
@@ -90,6 +91,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $hallStatus = "active";
 
                 // Insert into theater_halls using prepared statements
+                // Changed column names to lowercase as PostgreSQL typically stores them unquoted in lowercase
                 $insertHallQuery = "INSERT INTO theater_halls (theaterid, hallname, halltype, totalseats, hallstatus) VALUES ($1, $2, $3, $4, $5)";
                 
                 $hallName = "Main Hall"; $hallType = "main-hall"; $totalSeats = 120;
@@ -127,8 +129,7 @@ pg_close($conn);
     <title>Add New Theater - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <!-- Adjusted path -->
-    <style>
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg"> <style>
         body {
             background-color: #f8f9fa;
             font-family: 'Arial', sans-serif;

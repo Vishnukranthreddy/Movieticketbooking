@@ -23,94 +23,80 @@ if (!$conn) {
     die("Connection failed: " . pg_last_error());
 }
 
-// Fetch all data for reports
-$revenueByMovieQuery = "
-    SELECT m.movieid, m.movietitle, COUNT(b.bookingid) as bookingcount, SUM(b.amount) as totalrevenue
-    FROM movietable m
-    LEFT JOIN bookingtable b ON m.movieid = b.movieid
-    GROUP BY m.movieid, m.movietitle
-    ORDER BY totalrevenue DESC
-    LIMIT 10
-";
-$revenueByMovieResult = pg_query($conn, $revenueByMovieQuery);
-if (!$revenueByMovieResult) {
-    die("Error fetching revenue by movie: " . pg_last_error($conn));
+// Handle location deletion
+$successMessage = '';
+$errorMessage = '';
+if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
+    $locationId = $_GET['delete'];
+    
+    // Check if the location exists
+    $checkQuery = "SELECT \"locationID\" FROM locations WHERE \"locationID\" = $1";
+    $checkResult = pg_query_params($conn, $checkQuery, array($locationId));
+    
+    if ($checkResult && pg_num_rows($checkResult) > 0) {
+        // Check if location is used in movies
+        $checkMoviesQuery = "SELECT COUNT(*) as count FROM movietable WHERE \"locationID\" = $1";
+        $checkMoviesResult = pg_query_params($conn, $checkMoviesQuery, array($locationId));
+        $moviesCount = pg_fetch_assoc($checkMoviesResult)['count'];
+        
+        if ($moviesCount > 0) {
+            $errorMessage = "Cannot delete location. It is associated with " . $moviesCount . " movie(s).";
+        } else {
+            // Delete the location
+            $deleteQuery = "DELETE FROM locations WHERE \"locationID\" = $1";
+            $deleteResult = pg_query_params($conn, $deleteQuery, array($locationId));
+            
+            if ($deleteResult) {
+                $successMessage = "Location deleted successfully!";
+            } else {
+                $errorMessage = "Error deleting location: " . pg_last_error($conn);
+            }
+        }
+    } else {
+        $errorMessage = "Location not found!";
+    }
 }
 
-$revenueByDateQuery = "
-    SELECT TO_CHAR(ms.showdate, 'YYYY-MM-DD') as showdateformatted,
-           COUNT(b.bookingid) as bookingcount,
-           SUM(b.amount) as dailyrevenue
-    FROM bookingtable b
-    JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
-    GROUP BY showdateformatted
-    ORDER BY showdateformatted DESC
-    LIMIT 30
-";
-$revenueByDateResult = pg_query($conn, $revenueByDateQuery);
-if (!$revenueByDateResult) {
-    die("Error fetching revenue by date: " . pg_last_error($conn));
+// Handle location addition
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_location'])) {
+    $locationName = $_POST['locationName'];
+    $locationState = $_POST['locationState'];
+    $locationCountry = $_POST['locationCountry'];
+    $locationStatus = $_POST['locationStatus'];
+    
+    $insertQuery = "INSERT INTO locations (\"locationName\", \"locationState\", \"locationCountry\", \"locationStatus\") VALUES ($1, $2, $3, $4)";
+    $insertResult = pg_query_params($conn, $insertQuery, array($locationName, $locationState, $locationCountry, $locationStatus));
+    
+    if ($insertResult) {
+        $successMessage = "Location added successfully!";
+    } else {
+        $errorMessage = "Error adding location: " . pg_last_error($conn);
+    }
 }
 
-$revenueByTheaterQuery = "
-    SELECT b.bookingtheatre, COUNT(b.bookingid) as bookingcount, SUM(b.amount) as totalrevenue
-    FROM bookingtable b
-    GROUP BY b.bookingtheatre
-    ORDER BY totalrevenue DESC
-";
-$revenueByTheaterResult = pg_query($conn, $revenueByTheaterQuery);
-if (!$revenueByTheaterResult) {
-    die("Error fetching revenue by theater: " . pg_last_error($conn));
+// Handle location update
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_location'])) {
+    $locationId = $_POST['locationId'];
+    $locationName = $_POST['locationName'];
+    $locationState = $_POST['locationState'];
+    $locationCountry = $_POST['locationCountry'];
+    $locationStatus = $_POST['locationStatus'];
+    
+    $updateQuery = "UPDATE locations SET \"locationName\" = $1, \"locationState\" = $2, \"locationCountry\" = $3, \"locationStatus\" = $4 WHERE \"locationID\" = $5";
+    $updateResult = pg_query_params($conn, $updateQuery, array($locationName, $locationState, $locationCountry, $locationStatus, $locationId));
+    
+    if ($updateResult) {
+        $successMessage = "Location updated successfully!";
+    } else {
+        $errorMessage = "Error updating location: " . pg_last_error($conn);
+    }
 }
 
-$popularTimesQuery = "
-    SELECT ms.showtime, COUNT(b.bookingid) as bookingcount
-    FROM bookingtable b
-    JOIN movie_schedules ms ON b.scheduleid = ms.scheduleid
-    GROUP BY ms.showtime
-    ORDER BY bookingcount DESC
-    LIMIT 10
-";
-$popularTimesResult = pg_query($conn, $popularTimesQuery);
-if (!$popularTimesResult) {
-    die("Error fetching popular times: " . pg_last_error($conn));
-}
-
-// Total revenue and bookings
-$totalRevenueQuery = "SELECT SUM(amount) as totalrevenue FROM bookingtable";
-$totalRevenue = pg_fetch_assoc(pg_query($conn, $totalRevenueQuery))['totalrevenue'] ?? 0;
-
-$totalBookingsQuery = "SELECT COUNT(*) as totalbookings FROM bookingtable";
-$totalBookings = pg_fetch_assoc(pg_query($conn, $totalBookingsQuery))['totalbookings'] ?? 0;
-$avgRevenue = $totalBookings > 0 ? $totalRevenue / $totalBookings : 0;
-
-// Prepare data for Chart.js in PHP variables
-$revenueByMovieLabels = [];
-$revenueByMovieData = [];
-while($row = pg_fetch_assoc($revenueByMovieResult)) {
-    $revenueByMovieLabels[] = $row['movietitle'];
-    $revenueByMovieData[] = $row['totalrevenue'];
-}
-
-$revenueByDateLabels = [];
-$revenueByDateData = [];
-while($row = pg_fetch_assoc($revenueByDateResult)) {
-    $revenueByDateLabels[] = $row['showdateformatted'];
-    $revenueByDateData[] = $row['dailyrevenue'];
-}
-
-$revenueByTheaterLabels = [];
-$revenueByTheaterData = [];
-while($row = pg_fetch_assoc($revenueByTheaterResult)) {
-    $revenueByTheaterLabels[] = ucfirst(str_replace('-', ' ', $row['bookingtheatre']));
-    $revenueByTheaterData[] = $row['totalrevenue'];
-}
-
-$popularTimesLabels = [];
-$popularTimesData = [];
-while($row = pg_fetch_assoc($popularTimesResult)) {
-    $popularTimesLabels[] = date('h:i A', strtotime($row['showtime']));
-    $popularTimesData[] = $row['bookingcount'];
+// Get all locations
+$locationsQuery = "SELECT * FROM locations ORDER BY \"locationName\"";
+$locations = pg_query($conn, $locationsQuery);
+if (!$locations) {
+    die("Error fetching locations: " . pg_last_error($conn));
 }
 
 pg_close($conn);
@@ -121,11 +107,10 @@ pg_close($conn);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports - Showtime Select Admin</title>
+    <title>Manage Locations - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
     <link rel="icon" type="image/png" href="../img/sslogo.jpg">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             background-color: #f8f9fa;
@@ -195,7 +180,7 @@ pg_close($conn);
             margin-left: 240px;
             padding: 20px;
         }
-        .report-container {
+        .table-container {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -206,88 +191,21 @@ pg_close($conn);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
-        }
-        .admin-user-info {
-            display: flex;
-            align-items: center;
-        }
-        .admin-user-info img {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            margin-right: 10px;
-        }
-        .admin-user-info span {
-            font-weight: bold;
-        }
-        .stats-card {
-            background-color: #fff;
-            border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            padding: 20px;
             margin-bottom: 20px;
-            text-align: center;
         }
-        .stats-card h3 {
-            margin-bottom: 10px;
-            font-size: 1.5rem;
-        }
-        .stats-card p {
-            font-size: 2rem;
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
             font-weight: bold;
-            margin-bottom: 0;
         }
-        .stats-card.primary p {
-            color: #007bff;
+        .status-active {
+            background-color: #d4edda;
+            color: #155724;
         }
-        .stats-card.success p {
-            color: #28a745;
-        }
-        .stats-card.info p {
-            color: #17a2b8;
-        }
-        .chart-container {
-            position: relative;
-            height: 300px;
-            margin-bottom: 30px;
-        }
-        .btn-signout {
-            background-color: #dc3545;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .btn-signout:hover {
-            background-color: #c82333;
-        }
-        
-        /* Mobile responsiveness */
-        @media (max-width: 768px) {
-            .sidebar {
-                position: static;
-                height: auto;
-                padding: 0;
-            }
-            .sidebar-sticky {
-                height: auto;
-            }
-            .main-content {
-                margin-left: 0;
-                padding: 15px;
-            }
-            .admin-header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            .admin-user-info {
-                margin-top: 15px;
-            }
-            .chart-container {
-                height: 250px;
-            }
+        .status-inactive {
+            background-color: #f8d7da;
+            color: #721c24;
         }
     </style>
 </head>
@@ -296,7 +214,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="btn btn-signout" href="../admin/logout.php">Sign out</a>
+                <a class="nav-link" href="../admin/logout.php">Sign out</a>
             </li>
         </ul>
     </nav>
@@ -306,13 +224,16 @@ pg_close($conn);
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Theater Management</span>
-                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../content_manager/movies.php">
+                                <i class="fas fa-film"></i>
+                                Movies
                             </a>
                         </li>
                         <li class="nav-item">
@@ -322,7 +243,7 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="locations.php">
+                            <a class="nav-link active" href="locations.php">
                                 <i class="fas fa-map-marker-alt"></i>
                                 Locations
                             </a>
@@ -339,26 +260,17 @@ pg_close($conn);
                                 Bookings
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link active" href="reports.php"> <!-- This is the reports page itself for TM -->
-                                <i class="fas fa-chart-bar"></i>
-                                Reports
-                            </a>
-                        </li>
-                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Theater Manager sidebar ?>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Admin Functions (Super Admin)</span>
-                        </h6>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../admin/dashboard.php">
-                                <i class="fas fa-home"></i>
-                                Super Admin Dashboard
-                            </a>
-                        </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees Users, Reports, Settings in Theater Manager sidebar ?>
                         <li class="nav-item">
                             <a class="nav-link" href="../admin/users.php">
                                 <i class="fas fa-users"></i>
                                 Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                All Reports
                             </a>
                         </li>
                         <li class="nav-item">
@@ -367,162 +279,178 @@ pg_close($conn);
                                 Settings
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../admin/reports.php"> <!-- Super Admin's comprehensive reports -->
-                                <i class="fas fa-chart-bar"></i>
-                                All Reports
-                            </a>
-                        </li>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Content Management (Super Admin)</span>
-                        </h6>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../content_manager/movies.php">
-                                <i class="fas fa-film"></i>
-                                Movies
-                            </a>
-                        </li>
                         <?php endif; ?>
+                        <li class="nav-item">
+                            <a class="nav-link" href="reports.php">
+                                <i class="fas fa-chart-bar"></i>
+                                Theater Reports
+                            </a>
+                        </li>
                     </ul>
                 </div>
             </nav>
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Reports & Analytics</h1>
-                    <div class="admin-user-info">
-                        <img src="https://placehold.co/40x40/cccccc/333333?text=Admin" alt="Admin">
-                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
-                    </div>
+                    <h1>Manage Locations</h1>
+                    <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#addLocationModal">
+                        <i class="fas fa-plus"></i> Add New Location
+                    </button>
                 </div>
 
-                <div class="row">
-                    <div class="col-md-4">
-                        <div class="stats-card primary">
-                            <h3>Total Revenue</h3>
-                            <p>₹<?php echo number_format($totalRevenue, 2); ?></p>
-                        </div>
+                <?php if (isset($successMessage)): ?>
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <?php echo $successMessage; ?>
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
                     </div>
-                    <div class="col-md-4">
-                        <div class="stats-card success">
-                            <h3>Total Bookings</h3>
-                            <p><?php echo number_format($totalBookings); ?></p>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="stats-card info">
-                            <h3>Avg. Revenue per Booking</h3>
-                            <p>₹<?php echo number_format($avgRevenue, 2); ?></p>
-                        </div>
-                    </div>
-                </div>
+                <?php endif; ?>
 
-                <div class="report-container">
-                    <h3>Revenue by Movie</h3>
-                    <div class="chart-container">
-                        <canvas id="revenueByMovieChart"></canvas>
+                <?php if (isset($errorMessage)): ?>
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        <?php echo $errorMessage; ?>
+                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
                     </div>
+                <?php endif; ?>
+
+                <div class="table-container">
                     <div class="table-responsive">
-                        <table class="table table-striped">
-                            <thead>
+                        <table class="table table-striped table-hover">
+                            <thead class="thead-dark">
                                 <tr>
-                                    <th>Movie</th>
-                                    <th>Bookings</th>
-                                    <th>Revenue</th>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>State</th>
+                                    <th>Country</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php
-                                // Reset pointer for pg_fetch_assoc
-                                if (pg_num_rows($revenueByMovieResult) > 0) {
-                                    pg_result_seek($revenueByMovieResult, 0);
-                                }
-                                while ($movie = pg_fetch_assoc($revenueByMovieResult)): ?>
+                                <?php if (pg_num_rows($locations) > 0): ?>
+                                    <?php while ($location = pg_fetch_assoc($locations)): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($location['locationID']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationName']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationState']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationCountry']); ?></td>
+                                            <td>
+                                                <span class="status-badge <?php echo $location['locationStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($location['locationStatus'])); ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-warning edit-location" 
+                                                        data-id="<?php echo htmlspecialchars($location['locationID']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($location['locationName']); ?>"
+                                                        data-state="<?php echo htmlspecialchars($location['locationState']); ?>"
+                                                        data-country="<?php echo htmlspecialchars($location['locationCountry']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($location['locationStatus']); ?>"
+                                                        data-toggle="modal" data-target="#editLocationModal">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <a href="locations.php?delete=<?php echo htmlspecialchars($location['locationID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location? This may affect movies linked to this location.')">
+                                                    <i class="fas fa-trash"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
-                                        <td><?php echo htmlspecialchars($movie['bookingcount']); ?></td>
-                                        <td>₹<?php echo number_format($movie['totalrevenue'], 2); ?></td>
+                                        <td colspan="6" class="text-center">No locations found</td>
                                     </tr>
-                                <?php endwhile; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
                 </div>
-
-                <div class="report-container">
-                    <h3>Revenue by Date</h3>
-                    <div class="chart-container">
-                        <canvas id="revenueByDateChart"></canvas>
-                    </div>
-                </div>
-
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="report-container">
-                            <h3>Revenue by Theater</h3>
-                            <div class="chart-container">
-                                <canvas id="revenueByTheaterChart"></canvas>
-                            </div>
-                            <div class="table-responsive">
-                                <table class="table table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>Theater</th>
-                                            <th>Bookings</th>
-                                            <th>Revenue</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php
-                                        // Reset pointer for pg_fetch_assoc
-                                        if (pg_num_rows($revenueByTheaterResult) > 0) {
-                                            pg_result_seek($revenueByTheaterResult, 0);
-                                        }
-                                        while ($theater = pg_fetch_assoc($revenueByTheaterResult)): ?>
-                                            <tr>
-                                                <td><?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $theater['bookingtheatre']))); ?></td>
-                                                <td><?php echo htmlspecialchars($theater['bookingcount']); ?></td>
-                                                <td>₹<?php echo number_format($theater['totalrevenue'], 2); ?></td>
-                                            </tr>
-                                        <?php endwhile; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="report-container">
-                            <h3>Popular Show Times</h3>
-                            <div class="chart-container">
-                                <canvas id="popularTimesChart"></canvas>
-                            </div>
-                            <div class="table-responsive">
-                                <table class="table table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>Time</th>
-                                            <th>Bookings</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php
-                                        // Reset pointer for pg_fetch_assoc
-                                        if (pg_num_rows($popularTimesResult) > 0) {
-                                            pg_result_seek($popularTimesResult, 0);
-                                        }
-                                        while ($time = pg_fetch_assoc($popularTimesResult)): ?>
-                                            <tr>
-                                                <td><?php echo htmlspecialchars(date('h:i A', strtotime($time['showtime']))); ?></td>
-                                                <td><?php echo htmlspecialchars($time['bookingcount']); ?></td>
-                                            </tr>
-                                        <?php endwhile; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </main>
+        </div>
+    </div>
+
+    <!-- Add Location Modal -->
+    <div class="modal fade" id="addLocationModal" tabindex="-1" role="dialog" aria-labelledby="addLocationModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addLocationModalLabel">Add New Location</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <form action="" method="POST">
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="locationName">Location Name</label>
+                            <input type="text" class="form-control" id="locationName" name="locationName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="locationState">State</label>
+                            <input type="text" class="form-control" id="locationState" name="locationState">
+                        </div>
+                        <div class="form-group">
+                            <label for="locationCountry">Country</label>
+                            <input type="text" class="form-control" id="locationCountry" name="locationCountry" value="India">
+                        </div>
+                        <div class="form-group">
+                            <label for="locationStatus">Status</label>
+                            <select class="form-control" id="locationStatus" name="locationStatus">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        <button type="submit" name="add_location" class="btn btn-primary">Add Location</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Location Modal -->
+    <div class="modal fade" id="editLocationModal" tabindex="-1" role="dialog" aria-labelledby="editLocationModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editLocationModalLabel">Edit Location</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <form action="" method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" id="edit_locationId" name="locationId">
+                        <div class="form-group">
+                            <label for="edit_locationName">Location Name</label>
+                            <input type="text" class="form-control" id="edit_locationName" name="locationName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_locationState">State</label>
+                            <input type="text" class="form-control" id="edit_locationState" name="locationState">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_locationCountry">Country</label>
+                            <input type="text" class="form-control" id="edit_locationCountry" name="locationCountry">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit_locationStatus">Status</label>
+                            <select class="form-control" id="edit_locationStatus" name="locationStatus">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        <button type="submit" name="update_location" class="btn btn-primary">Update Location</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 
@@ -530,162 +458,19 @@ pg_close($conn);
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
-        // Data passed from PHP to JavaScript
-        const revenueByMovieLabels = <?php echo json_encode($revenueByMovieLabels); ?>;
-        const revenueByMovieData = <?php echo json_encode($revenueByMovieData); ?>;
-        const revenueByDateLabels = <?php echo json_encode($revenueByDateLabels); ?>;
-        const revenueByDateData = <?php echo json_encode($revenueByDateData); ?>;
-        const revenueByTheaterLabels = <?php echo json_encode($revenueByTheaterLabels); ?>;
-        const revenueByTheaterData = <?php echo json_encode($revenueByTheaterData); ?>;
-        const popularTimesLabels = <?php echo json_encode($popularTimesLabels); ?>;
-        const popularTimesData = <?php echo json_encode($popularTimesData); ?>;
-
-        // Revenue by Movie Chart
-        const revenueByMovieCtx = document.getElementById('revenueByMovieChart').getContext('2d');
-        const revenueByMovieChart = new Chart(revenueByMovieCtx, {
-            type: 'bar',
-            data: {
-                labels: revenueByMovieLabels,
-                datasets: [{
-                    label: 'Revenue (₹)',
-                    data: revenueByMovieData,
-                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
-                    borderColor: 'rgba(54, 162, 235, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': ₹' + context.parsed.y.toFixed(2);
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Revenue by Date Chart
-        const revenueByDateCtx = document.getElementById('revenueByDateChart').getContext('2d');
-        const revenueByDateChart = new Chart(revenueByDateCtx, {
-            type: 'line',
-            data: {
-                labels: revenueByDateLabels,
-                datasets: [{
-                    label: 'Daily Revenue (₹)',
-                    data: revenueByDateData,
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    borderWidth: 2,
-                    tension: 0.1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': ₹' + context.parsed.y.toFixed(2);
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Revenue by Theater Chart
-        const revenueByTheaterCtx = document.getElementById('revenueByTheaterChart').getContext('2d');
-        const revenueByTheaterChart = new Chart(revenueByTheaterCtx, {
-            type: 'pie',
-            data: {
-                labels: revenueByTheaterLabels,
-                datasets: [{
-                    data: revenueByTheaterData,
-                    backgroundColor: [
-                        'rgba(255, 99, 132, 0.5)',
-                        'rgba(54, 162, 235, 0.5)',
-                        'rgba(255, 206, 86, 0.5)',
-                        'rgba(75, 192, 192, 0.5)',
-                        'rgba(153, 102, 255, 0.5)',
-                        'rgba(255, 159, 64, 0.5)',
-                        'rgba(199, 199, 199, 0.5)'
-                    ],
-                    borderColor: [
-                        'rgba(255, 99, 132, 1)',
-                        'rgba(54, 162, 235, 1)',
-                        'rgba(255, 206, 86, 1)',
-                        'rgba(75, 192, 192, 1)',
-                        'rgba(153, 102, 255, 1)',
-                        'rgba(255, 159, 64, 1)',
-                        'rgba(199, 199, 199, 1)'
-                    ],
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                let label = context.label || '';
-                                if (label) {
-                                    label += ': ';
-                                }
-                                if (context.parsed !== null) {
-                                    label += '₹' + context.parsed.toFixed(2);
-                                }
-                                return label;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Popular Times Chart
-        const popularTimesCtx = document.getElementById('popularTimesChart').getContext('2d');
-        const popularTimesChart = new Chart(popularTimesCtx, {
-            type: 'bar',
-            data: {
-                labels: popularTimesLabels,
-                datasets: [{
-                    label: 'Number of Bookings',
-                    data: popularTimesData,
-                    backgroundColor: 'rgba(153, 102, 255, 0.5)',
-                    borderColor: 'rgba(153, 102, 255, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            stepSize: 1 // Ensure integer steps for counts
-                        }
-                    }
-                }
-            }
+        // Fill edit modal with location data
+        $('.edit-location').click(function() {
+            var id = $(this).data('id');
+            var name = $(this).data('name');
+            var state = $(this).data('state');
+            var country = $(this).data('country');
+            var status = $(this).data('status');
+            
+            $('#edit_locationId').val(id);
+            $('#edit_locationName').val(name);
+            $('#edit_locationState').val(state);
+            $('#edit_locationCountry').val(country);
+            $('#edit_locationStatus').val(status);
         });
     </script>
 </body>

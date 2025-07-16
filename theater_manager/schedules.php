@@ -67,7 +67,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_schedule'])) {
     $status = $_POST['status'];
     
     // Note: movieID and hallID are foreign keys, ensure they are correctly referenced
-    $insertQuery = "INSERT INTO movie_schedules (\"movieID\", \"hallID\", \"showDate\", \"showTime\", price, \"scheduleStatus\") VALUES ($1, $2, $3, $4, $5, $6)";
+    $insertQuery = "INSERT INTO movie_schedules (movieid, hallid, showdate, showtime, price, schedulestatus) VALUES ($1, $2, $3, $4, $5, $6)";
     $insertResult = pg_query_params($conn, $insertQuery, array($movieId, $hallId, $showDate, $showTime, $price, $status));
     
     if ($insertResult) {
@@ -122,10 +122,10 @@ if (!empty($search)) {
 $countQuery = "
     SELECT COUNT(*) as total 
     FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.movieid 
-    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
+    JOIN movietable m ON ms.movieid = m.movieid 
+    JOIN theater_halls h ON ms.hallid = h.hallid 
     JOIN theaters t ON h.theaterid = t.theaterid 
-    " . $searchCondition;
+" . $searchCondition;
 
 $stmtCountResult = pg_query_params($conn, $countQuery, $params);
 if (!$stmtCountResult) {
@@ -137,14 +137,14 @@ $totalPages = ceil($totalRecords / $recordsPerPage);
 // Get schedules for current page
 // Changed "theaterID" to "theaterid"
 $query = "
-    SELECT ms.*, m.movietitle, h.\"hallName\", h.\"hallType\", t.\"theaterName\" 
-    FROM movie_schedules ms
-    JOIN movietable m ON ms.\"movieID\" = m.movieid 
-    JOIN theater_halls h ON ms.\"hallID\" = h.\"hallID\"
-    JOIN theaters t ON h.theaterid = t.theaterid 
-    " . $searchCondition . "
-    ORDER BY ms.\"showDate\" DESC, ms.\"showTime\" DESC
-    LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
+SELECT ms.*, m.movietitle, h.hallname, h.halltype, t.theatername 
+FROM movie_schedules ms
+JOIN movietable m ON ms.movieid = m.movieid 
+JOIN theater_halls h ON ms.hallid = h.hallid 
+JOIN theaters t ON h.theaterid = t.theaterid 
+" . $searchCondition . "
+ORDER BY ms.showdate DESC, ms.showtime DESC
+LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
 $query_params = array_merge($params, [$recordsPerPage, $offset]);
 $schedules = pg_query_params($conn, $query, $query_params);
@@ -437,26 +437,26 @@ pg_close($conn);
                                 <?php if (pg_num_rows($schedules) > 0): ?>
                                     <?php while ($schedule = pg_fetch_assoc($schedules)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($schedule['scheduleID']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['scheduleid']); ?></td>
                                             <td><?php echo htmlspecialchars($schedule['movietitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($schedule['theaterName']); ?></td>
+                                            <td><?php echo htmlspecialchars($schedule['theatername']); ?></td>
                                             <td>
-                                                <?php echo htmlspecialchars($schedule['hallName']); ?> 
-                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['hallType']))); ?>)</span>
+                                                <?php echo htmlspecialchars($schedule['hallname']); ?> 
+                                                <span class="hall-type">(<?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($schedule['halltype']))); ?>)</span>
                                             </td>
-                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showDate']))); ?></td>
-                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showTime']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('d M Y', strtotime($schedule['showdate']))); ?></td>
+                                            <td><?php echo htmlspecialchars(date('h:i A', strtotime($schedule['showtime']))); ?></td>
                                             <td>₹<?php echo number_format($schedule['price'], 2); ?></td>
                                             <td>
-                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['scheduleStatus']); ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($schedule['scheduleStatus'])); ?>
+                                                <span class="status-badge status-<?php echo htmlspecialchars($schedule['schedulestatus']); ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($schedule['schedulestatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_schedule.php?id=<?php echo htmlspecialchars($schedule['scheduleid']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
+                                                <a href="schedules.php?delete=<?php echo htmlspecialchars($schedule['scheduleid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this schedule? This will also delete associated bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
@@ -543,8 +543,8 @@ pg_close($conn);
                                     pg_result_seek($halls, 0);
                                 }
                                 while ($hall = pg_fetch_assoc($halls)): ?>
-                                    <option value="<?php echo htmlspecialchars($hall['hallID']); ?>">
-                                        <?php echo htmlspecialchars($hall['theaterName'] . ' - ' . $hall['hallName'] . ' (' . str_replace('-', ' ', $hall['hallType']) . ')'); ?>
+                                    <option value="<?php echo htmlspecialchars($hall['hallid']); ?>">
+                                        <?php echo htmlspecialchars($hall['theatername'] . ' - ' . $hall['hallname'] . ' (' . str_replace('-', ' ', $hall['halltype']) . ')'); ?>
                                     </option>
                                 <?php endwhile; ?>
                             </select>

@@ -3,7 +3,7 @@ session_start();
 
 // RBAC: Accessible by Super Admin (roleID 1) and Content Manager (roleID 3)
 if (!isset($_SESSION['admin_id']) || ($_SESSION['admin_role'] != 1 && $_SESSION['admin_role'] != 3)) {
-    header("Location: ../admin/index.php"); // Redirect to central admin login
+    header("Location: ../admin/index.php"); // Corrected path
     exit();
 }
 
@@ -30,14 +30,12 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $movieId = $_GET['delete'];
     
     // Check if the movie exists
-    // Ensure column names are lowercase
-    $checkQuery = "SELECT movieid FROM movietable WHERE movieid = $1";
+    $checkQuery = "SELECT \"movieID\" FROM movietable WHERE \"movieID\" = $1";
     $checkResult = pg_query_params($conn, $checkQuery, array($movieId));
     
     if ($checkResult && pg_num_rows($checkResult) > 0) {
         // Check if movie is used in schedules
-        // Ensure column names are lowercase
-        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE movieid = $1";
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"movieID\" = $1";
         $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
         $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
@@ -45,8 +43,7 @@ if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
             $errorMessage = "Cannot delete movie. It is associated with " . $schedulesCount . " schedule(s). Delete schedules first.";
         } else {
             // Delete the movie
-            // Ensure column names are lowercase
-            $deleteQuery = "DELETE FROM movietable WHERE movieid = $1";
+            $deleteQuery = "DELETE FROM movietable WHERE \"movieID\" = $1";
             $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
             
             if ($deleteResult) {
@@ -74,8 +71,7 @@ $param_index = 1;
 if (!empty($search)) {
     $searchParam = "%" . $search . "%";
     // Using ILIKE for case-insensitive search in PostgreSQL
-    // Ensure column names are lowercase
-    $searchCondition = "WHERE movietitle ILIKE $" . ($param_index++) . " OR moviegenre ILIKE $" . ($param_index++) . " OR moviedirector ILIKE $" . ($param_index++) . "";
+    $searchCondition = "WHERE \"movieTitle\" ILIKE $" . ($param_index++) . " OR \"movieGenre\" ILIKE $" . ($param_index++) . " OR \"movieDirector\" ILIKE $" . ($param_index++) . "";
     $params = [$searchParam, $searchParam, $searchParam];
 }
 
@@ -90,13 +86,12 @@ $totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
 $totalPages = ceil($totalRecords / $recordsPerPage);
 
 // Get movies for current page
-// Ensure column names are lowercase in the SELECT query
 $query = "
-    SELECT m.*, l.locationname 
+    SELECT m.*, l.\"locationName\" 
     FROM movietable m 
-    LEFT JOIN locations l ON m.locationid = l.locationid 
+    LEFT JOIN locations l ON m.\"locationID\" = l.\"locationID\" 
     " . $searchCondition . " 
-    ORDER BY m.movieid DESC 
+    ORDER BY m.\"movieID\" DESC 
     LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
 
 $query_params = array_merge($params, [$recordsPerPage, $offset]);
@@ -117,7 +112,7 @@ pg_close($conn);
     <title>Manage Movies - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
-    <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Adjusted path -->
+    <link rel="icon" type="image/png" href="../img/sslogo.jpg">
     <style>
         body {
             background-color: #f8f9fa;
@@ -230,9 +225,6 @@ pg_close($conn);
             <nav class="col-md-2 d-none d-md-block sidebar">
                 <div class="sidebar-sticky">
                     <ul class="nav flex-column">
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Content Management</span>
-                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="dashboard.php">
                                 <i class="fas fa-tachometer-alt"></i>
@@ -245,37 +237,6 @@ pg_close($conn);
                                 Movies
                             </a>
                         </li>
-                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees these links in Content Manager sidebar ?>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Admin Functions (Super Admin)</span>
-                        </h6>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../admin/dashboard.php">
-                                <i class="fas fa-home"></i>
-                                Super Admin Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../admin/users.php">
-                                <i class="fas fa-users"></i>
-                                Users
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../admin/settings.php">
-                                <i class="fas fa-cog"></i>
-                                Settings
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="../admin/reports.php">
-                                <i class="fas fa-chart-bar"></i>
-                                All Reports
-                            </a>
-                        </li>
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                            <span>Theater Management (Super Admin)</span>
-                        </h6>
                         <li class="nav-item">
                             <a class="nav-link" href="../theater_manager/theaters.php">
                                 <i class="fas fa-building"></i>
@@ -300,10 +261,23 @@ pg_close($conn);
                                 Bookings
                             </a>
                         </li>
+                        <?php if ($_SESSION['admin_role'] == 1): // Only Super Admin sees Users, Reports, Settings in Content Manager sidebar ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="../theater_manager/reports.php">
+                            <a class="nav-link" href="../admin/users.php">
+                                <i class="fas fa-users"></i>
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/reports.php">
                                 <i class="fas fa-chart-bar"></i>
-                                Theater Reports
+                                All Reports
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="../admin/settings.php">
+                                <i class="fas fa-cog"></i>
+                                Settings
                             </a>
                         </li>
                         <?php endif; ?>
@@ -372,28 +346,25 @@ pg_close($conn);
                             </thead>
                             <tbody>
                                 <?php if (pg_num_rows($movies) > 0): ?>
-                                    <?php while ($movie = pg_fetch_assoc($movies)): 
-                                        // Ensure fetched keys are lowercase for consistency
-                                        $movie = array_change_key_case($movie, CASE_LOWER);
-                                    ?>
+                                    <?php while ($movie = pg_fetch_assoc($movies)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieID']); ?></td>
                                             <td>
-                                                <img src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image">
+                                                <img src="<?php echo '../' . htmlspecialchars($movie['movieImg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movieTitle']); ?>" class="movie-image">
                                             </td>
-                                            <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
-                                            <td><?php echo htmlspecialchars($movie['moviereldate']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieTitle']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieGenre']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['movieDuration']); ?> min</td>
+                                            <td><?php echo htmlspecialchars($movie['movieRelDate']); ?></td>
+                                            <td><?php echo htmlspecialchars($movie['locationName'] ?? 'N/A'); ?></td>
                                             <td>
-                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-warning">
+                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-warning">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
-                                                <a href="movies.php?delete=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules!')">
+                                                <a href="movies.php?delete=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
-                                                <a href="../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-info" target="_blank">
+                                                <a href="../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieID']); ?>" class="btn btn-sm btn-info" target="_blank">
                                                     <i class="fas fa-eye"></i>
                                                 </a>
                                             </td>

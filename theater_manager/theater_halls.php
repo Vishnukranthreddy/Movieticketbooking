@@ -30,12 +30,12 @@ $errorMessage = '';
 $successMessage = '';
 
 if ($theaterId > 0) {
-    // Fetch theater name
-    $stmtTheaterQuery = "SELECT \"theaterName\" FROM theaters WHERE \"theaterID\" = $1";
+    // Fetch theater name - using lowercase quoted column name
+    $stmtTheaterQuery = "SELECT \"theatername\" FROM theaters WHERE \"theaterid\" = $1";
     $stmtTheaterResult = pg_query_params($conn, $stmtTheaterQuery, array($theaterId));
     if ($stmtTheaterResult && pg_num_rows($stmtTheaterResult) > 0) {
         $rowTheater = pg_fetch_assoc($stmtTheaterResult);
-        $theaterName = $rowTheater['theaterName'];
+        $theaterName = $rowTheater['theatername'];
     } else {
         $errorMessage = "Theater not found for ID: " . $theaterId;
         $theaterId = 0; // Invalidate theaterId if not found
@@ -45,23 +45,24 @@ if ($theaterId > 0) {
     if (isset($_GET['delete_hall']) && is_numeric($_GET['delete_hall'])) {
         $hallId = $_GET['delete_hall'];
 
-        // Check for dependencies (schedules) before deleting hall
-        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallID\" = $1";
+        // Check for dependencies (schedules) before deleting hall - using lowercase quoted column name
+        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE \"hallid\" = $1";
         $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($hallId));
         $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
 
         if ($schedulesCount > 0) {
             $errorMessage = "Cannot delete hall. It is associated with " . $schedulesCount . " schedule(s). Please delete all associated schedules first.";
         } else {
-            // Get hall panorama image path before deletion to remove the file
-            $stmtImgQuery = "SELECT \"hallPanoramaImg\" FROM theater_halls WHERE \"hallID\" = $1";
+            // Get hall panorama image path before deletion to remove the file - using lowercase quoted column name
+            $stmtImgQuery = "SELECT \"hallpanoramimg\" FROM theater_halls WHERE \"hallid\" = $1";
             $stmtImgResult = pg_query_params($conn, $stmtImgQuery, array($hallId));
             $hallPanoramaImgPath = null;
             if ($row = pg_fetch_assoc($stmtImgResult)) {
-                $hallPanoramaImgPath = $row['hallPanoramaImg'];
+                $hallPanoramaImgPath = $row['hallpanoramimg'];
             }
 
-            $deleteHallQuery = "DELETE FROM theater_halls WHERE \"hallID\" = $1 AND \"theaterID\" = $2";
+            // Delete hall - using lowercase quoted column names
+            $deleteHallQuery = "DELETE FROM theater_halls WHERE \"hallid\" = $1 AND \"theaterid\" = $2";
             $deleteHallResult = pg_query_params($conn, $deleteHallQuery, array($hallId, $theaterId));
             
             if ($deleteHallResult) {
@@ -121,7 +122,8 @@ if ($theaterId > 0) {
         }
 
         if ($uploadOk !== 0) {
-            $addHallQuery = "INSERT INTO theater_halls (\"theaterID\", \"hallName\", \"hallType\", \"totalSeats\", \"hallStatus\", \"hallPanoramaImg\") VALUES ($1, $2, $3, $4, $5, $6)";
+            // Add hall - using lowercase quoted column names
+            $addHallQuery = "INSERT INTO theater_halls (\"theaterid\", \"hallname\", \"halltype\", \"totalseats\", \"hallstatus\", \"hallpanoramimg\") VALUES ($1, $2, $3, $4, $5, $6)";
             $addHallResult = pg_query_params($conn, $addHallQuery, array($theaterId, $hallName, $hallType, $totalSeats, $hallStatus, $hallPanoramaImg));
             
             if ($addHallResult) {
@@ -183,7 +185,8 @@ if ($theaterId > 0) {
         }
 
         if ($uploadOk !== 0) {
-            $updateHallQuery = "UPDATE theater_halls SET \"hallName\" = $1, \"hallType\" = $2, \"totalSeats\" = $3, \"hallStatus\" = $4, \"hallPanoramaImg\" = $5 WHERE \"hallID\" = $6 AND \"theaterID\" = $7";
+            // Update hall - using lowercase quoted column names
+            $updateHallQuery = "UPDATE theater_halls SET \"hallname\" = $1, \"halltype\" = $2, \"totalseats\" = $3, \"hallstatus\" = $4, \"hallpanoramimg\" = $5 WHERE \"hallid\" = $6 AND \"theaterid\" = $7";
             $updateHallResult = pg_query_params($conn, $updateHallQuery, array($hallName, $hallType, $totalSeats, $hallStatus, $newHallPanoramaImg, $hallIdToUpdate, $theaterId));
             
             if ($updateHallResult) {
@@ -199,10 +202,10 @@ if ($theaterId > 0) {
     }
 
 
-    // Get all halls for this theater
+    // Get all halls for this theater - using lowercase quoted column name for ORDER BY
     // Re-fetch after any add/delete/update operation
     if ($theaterId > 0) {
-        $hallsQuery = "SELECT * FROM theater_halls WHERE \"theaterID\" = $1 ORDER BY \"hallName\"";
+        $hallsQuery = "SELECT * FROM theater_halls WHERE \"theaterid\" = $1 ORDER BY \"hallname\"";
         $halls = pg_query_params($conn, $hallsQuery, array($theaterId));
         if (!$halls) {
             $errorMessage .= ($errorMessage ? "<br>" : "") . "Failed to fetch halls: " . pg_last_error($conn);
@@ -499,38 +502,38 @@ pg_close($conn);
                                 <tbody>
                                     <?php while ($hall = pg_fetch_assoc($halls)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($hall['hallID']); ?></td>
-                                            <td><?php echo htmlspecialchars($hall['hallName']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallid']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['hallname']); ?></td>
                                             <td>
-                                                <span class="hall-type-badge <?php echo htmlspecialchars($hall['hallType']); ?>">
-                                                    <?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['hallType']))); ?>
+                                                <span class="hall-type-badge <?php echo htmlspecialchars($hall['halltype']); ?>">
+                                                    <?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($hall['halltype']))); ?>
                                                 </span>
                                             </td>
-                                            <td><?php echo htmlspecialchars($hall['totalSeats']); ?></td>
+                                            <td><?php echo htmlspecialchars($hall['totalseats']); ?></td>
                                             <td>
-                                                <?php if (!empty($hall['hallPanoramaImg'])): ?>
-                                                    <img src="../<?php echo htmlspecialchars($hall['hallPanoramaImg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
+                                                <?php if (!empty($hall['hallpanoramimg'])): ?>
+                                                    <img src="../<?php echo htmlspecialchars($hall['hallpanoramimg']); ?>" alt="Panorama" class="preview-image" style="max-width: 50px; max-height: 50px;">
                                                 <?php else: ?>
                                                     N/A
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <span class="status-badge <?php echo $hall['hallStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($hall['hallStatus'])); ?>
+                                                <span class="status-badge <?php echo $hall['hallstatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($hall['hallstatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
                                                 <button type="button" class="btn btn-sm btn-warning edit-hall" 
-                                                        data-id="<?php echo htmlspecialchars($hall['hallID']); ?>"
-                                                        data-name="<?php echo htmlspecialchars($hall['hallName']); ?>"
-                                                        data-type="<?php echo htmlspecialchars($hall['hallType']); ?>"
-                                                        data-seats="<?php echo htmlspecialchars($hall['totalSeats']); ?>"
-                                                        data-status="<?php echo htmlspecialchars($hall['hallStatus']); ?>"
-                                                        data-panorama="<?php echo htmlspecialchars($hall['hallPanoramaImg'] ?? ''); ?>"
+                                                        data-id="<?php echo htmlspecialchars($hall['hallid']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($hall['hallname']); ?>"
+                                                        data-type="<?php echo htmlspecialchars($hall['halltype']); ?>"
+                                                        data-seats="<?php echo htmlspecialchars($hall['totalseats']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($hall['hallstatus']); ?>"
+                                                        data-panorama="<?php echo htmlspecialchars($hall['hallpanoramimg'] ?? ''); ?>"
                                                         data-toggle="modal" data-target="#editHallModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
-                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete_hall=<?php echo htmlspecialchars($hall['hallID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete associated schedules and bookings!')">
+                                                <a href="theater_halls.php?theater_id=<?php echo htmlspecialchars($theaterId); ?>&delete_hall=<?php echo htmlspecialchars($hall['hallid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this hall? This will also delete associated schedules and bookings!')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>

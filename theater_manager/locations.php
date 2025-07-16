@@ -29,21 +29,21 @@ $errorMessage = '';
 if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
     $locationId = $_GET['delete'];
     
-    // Check if the location exists
-    $checkQuery = "SELECT \"locationID\" FROM locations WHERE \"locationID\" = $1";
+    // Check if the location exists - using lowercase quoted column name
+    $checkQuery = "SELECT \"locationid\" FROM locations WHERE \"locationid\" = $1";
     $checkResult = pg_query_params($conn, $checkQuery, array($locationId));
     
     if ($checkResult && pg_num_rows($checkResult) > 0) {
-        // Check if location is used in movies
-        $checkMoviesQuery = "SELECT COUNT(*) as count FROM movietable WHERE \"locationID\" = $1";
+        // Check if location is used in movies - using lowercase quoted column name
+        $checkMoviesQuery = "SELECT COUNT(*) as count FROM movietable WHERE \"locationid\" = $1";
         $checkMoviesResult = pg_query_params($conn, $checkMoviesQuery, array($locationId));
         $moviesCount = pg_fetch_assoc($checkMoviesResult)['count'];
         
         if ($moviesCount > 0) {
             $errorMessage = "Cannot delete location. It is associated with " . $moviesCount . " movie(s).";
         } else {
-            // Delete the location
-            $deleteQuery = "DELETE FROM locations WHERE \"locationID\" = $1";
+            // Delete the location - using lowercase quoted column name
+            $deleteQuery = "DELETE FROM locations WHERE \"locationid\" = $1";
             $deleteResult = pg_query_params($conn, $deleteQuery, array($locationId));
             
             if ($deleteResult) {
@@ -64,7 +64,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_location'])) {
     $locationCountry = $_POST['locationCountry'];
     $locationStatus = $_POST['locationStatus'];
     
-    $insertQuery = "INSERT INTO locations (\"locationName\", \"locationState\", \"locationCountry\", \"locationStatus\") VALUES ($1, $2, $3, $4)";
+    // Insert into locations - using lowercase quoted column names
+    $insertQuery = "INSERT INTO locations (\"locationname\", \"locationstate\", \"locationcountry\", \"locationstatus\") VALUES ($1, $2, $3, $4)";
     $insertResult = pg_query_params($conn, $insertQuery, array($locationName, $locationState, $locationCountry, $locationStatus));
     
     if ($insertResult) {
@@ -82,7 +83,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_location'])) {
     $locationCountry = $_POST['locationCountry'];
     $locationStatus = $_POST['locationStatus'];
     
-    $updateQuery = "UPDATE locations SET \"locationName\" = $1, \"locationState\" = $2, \"locationCountry\" = $3, \"locationStatus\" = $4 WHERE \"locationID\" = $5";
+    // Update locations - using lowercase quoted column names
+    $updateQuery = "UPDATE locations SET \"locationname\" = $1, \"locationstate\" = $2, \"locationcountry\" = $3, \"locationstatus\" = $4 WHERE \"locationid\" = $5";
     $updateResult = pg_query_params($conn, $updateQuery, array($locationName, $locationState, $locationCountry, $locationStatus, $locationId));
     
     if ($updateResult) {
@@ -92,8 +94,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_location'])) {
     }
 }
 
-// Get all locations
-$locationsQuery = "SELECT * FROM locations ORDER BY \"locationName\"";
+// Get all locations - using lowercase quoted column name for ORDER BY
+$locationsQuery = "SELECT * FROM locations ORDER BY \"locationname\"";
 $locations = pg_query($conn, $locationsQuery);
 if (!$locations) {
     die("Error fetching locations: " . pg_last_error($conn));
@@ -333,26 +335,26 @@ pg_close($conn);
                                 <?php if (pg_num_rows($locations) > 0): ?>
                                     <?php while ($location = pg_fetch_assoc($locations)): ?>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($location['locationID']); ?></td>
-                                            <td><?php echo htmlspecialchars($location['locationName']); ?></td>
-                                            <td><?php echo htmlspecialchars($location['locationState']); ?></td>
-                                            <td><?php echo htmlspecialchars($location['locationCountry']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationid']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationname']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationstate']); ?></td>
+                                            <td><?php echo htmlspecialchars($location['locationcountry']); ?></td>
                                             <td>
-                                                <span class="status-badge <?php echo $location['locationStatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
-                                                    <?php echo ucfirst(htmlspecialchars($location['locationStatus'])); ?>
+                                                <span class="status-badge <?php echo $location['locationstatus'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
+                                                    <?php echo ucfirst(htmlspecialchars($location['locationstatus'])); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <button type="button" class="btn btn-sm btn-warning edit-location" 
-                                                        data-id="<?php echo htmlspecialchars($location['locationID']); ?>"
-                                                        data-name="<?php echo htmlspecialchars($location['locationName']); ?>"
-                                                        data-state="<?php echo htmlspecialchars($location['locationState']); ?>"
-                                                        data-country="<?php echo htmlspecialchars($location['locationCountry']); ?>"
-                                                        data-status="<?php echo htmlspecialchars($location['locationStatus']); ?>"
+                                                <button type="button" class="btn btn-sm btn-warning edit-location"
+                                                        data-id="<?php echo htmlspecialchars($location['locationid']); ?>"
+                                                        data-name="<?php echo htmlspecialchars($location['locationname']); ?>"
+                                                        data-state="<?php echo htmlspecialchars($location['locationstate']); ?>"
+                                                        data-country="<?php echo htmlspecialchars($location['locationcountry']); ?>"
+                                                        data-status="<?php echo htmlspecialchars($location['locationstatus']); ?>"
                                                         data-toggle="modal" data-target="#editLocationModal">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
-                                                <a href="locations.php?delete=<?php echo htmlspecialchars($location['locationID']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location? This may affect movies linked to this location.')">
+                                                <a href="locations.php?delete=<?php echo htmlspecialchars($location['locationid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this location? This may affect movies linked to this location.')">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>

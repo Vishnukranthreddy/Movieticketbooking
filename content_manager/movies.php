@@ -23,88 +23,35 @@ if (!$conn) {
     die("Connection failed: " . pg_last_error());
 }
 
-// Handle movie deletion
-$successMessage = '';
-$errorMessage = '';
-if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
-    $movieId = $_GET['delete'];
-    
-    // Check if the movie exists
-    // Ensure column names are lowercase
-    $checkQuery = "SELECT movieid FROM movietable WHERE movieid = $1";
-    $checkResult = pg_query_params($conn, $checkQuery, array($movieId));
-    
-    if ($checkResult && pg_num_rows($checkResult) > 0) {
-        // Check if movie is used in schedules
-        // Ensure column names are lowercase
-        $checkSchedulesQuery = "SELECT COUNT(*) as count FROM movie_schedules WHERE movieid = $1";
-        $checkSchedulesResult = pg_query_params($conn, $checkSchedulesQuery, array($movieId));
-        $schedulesCount = pg_fetch_assoc($checkSchedulesResult)['count'];
-
-        if ($schedulesCount > 0) {
-            $errorMessage = "Cannot delete movie. It is associated with " . $schedulesCount . " schedule(s). Delete schedules first.";
-        } else {
-            // Delete the movie
-            // Ensure column names are lowercase
-            $deleteQuery = "DELETE FROM movietable WHERE movieid = $1";
-            $deleteResult = pg_query_params($conn, $deleteQuery, array($movieId));
-            
-            if ($deleteResult) {
-                $successMessage = "Movie deleted successfully!";
-            } else {
-                $errorMessage = "Error deleting movie: " . pg_last_error($conn);
-            }
-        }
-    } else {
-        $errorMessage = "Movie not found!";
-    }
+// Get counts relevant to Content Manager
+// Using lowercase column names
+$movieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movietable");
+if (!$movieCountResult) {
+    die("Error fetching movie count: " . pg_last_error($conn));
 }
+$movieCount = pg_fetch_assoc($movieCountResult)['count'];
 
-// Get all movies with pagination
-$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$recordsPerPage = 10;
-$offset = ($page - 1) * $recordsPerPage;
-
-// Search functionality
-$search = isset($_GET['search']) ? $_GET['search'] : '';
-$searchCondition = '';
-$params = [];
-$param_index = 1;
-
-if (!empty($search)) {
-    $searchParam = "%" . $search . "%";
-    // Using ILIKE for case-insensitive search in PostgreSQL
-    // Ensure column names are lowercase
-    $searchCondition = "WHERE movietitle ILIKE $" . ($param_index++) . " OR moviegenre ILIKE $" . ($param_index++) . " OR moviedirector ILIKE $" . ($param_index++) . "";
-    $params = [$searchParam, $searchParam, $searchParam];
+// Using lowercase column names for movie_schedules
+$activeMovieCountResult = pg_query($conn, "SELECT COUNT(*) as count FROM movie_schedules WHERE schedulestatus = 'active' AND showdate >= CURRENT_DATE");
+if (!$activeMovieCountResult) {
+    die("Error fetching active movie count: " . pg_last_error($conn));
 }
+$activeMovieCount = pg_fetch_assoc($activeMovieCountResult)['count'];
 
-// Count total records for pagination
-$countQuery = "SELECT COUNT(*) as total FROM movietable " . $searchCondition;
 
-$stmtCountResult = pg_query_params($conn, $countQuery, $params);
-if (!$stmtCountResult) {
-    die("Error counting movies: " . pg_last_error($conn));
+// Get recent movies added/updated
+// Using lowercase column names for all columns in the SELECT query
+$recentMoviesQuery = "
+    SELECT m.movieid, m.movietitle, m.moviegenre, m.movieduration, m.movieimg, m.moviereldate, l.locationname
+    FROM movietable m
+    LEFT JOIN locations l ON m.locationid = l.locationid
+    ORDER BY m.movieid DESC LIMIT 5
+";
+$recentMovies = pg_query($conn, $recentMoviesQuery);
+if (!$recentMovies) {
+    die("Error fetching recent movies: " . pg_last_error($conn));
 }
-$totalRecords = pg_fetch_assoc($stmtCountResult)['total'];
-$totalPages = ceil($totalRecords / $recordsPerPage);
-
-// Get movies for current page
-// Ensure column names are lowercase in the SELECT query
-$query = "
-    SELECT m.*, l.locationname 
-    FROM movietable m 
-    LEFT JOIN locations l ON m.locationid = l.locationid 
-    " . $searchCondition . " 
-    ORDER BY m.movieid DESC 
-    LIMIT $" . ($param_index++) . " OFFSET $" . ($param_index++) . "";
-
-$query_params = array_merge($params, [$recordsPerPage, $offset]);
-$movies = pg_query_params($conn, $query, $query_params);
-
-if (!$movies) {
-    die("Error fetching movies: " . pg_last_error($conn));
-}
+$recentMoviesCount = pg_num_rows($recentMovies); // Get the count of recent movies
 
 pg_close($conn);
 ?>
@@ -114,7 +61,7 @@ pg_close($conn);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Movies - Showtime Select Admin</title>
+    <title>Content Dashboard - Showtime Select Admin</title>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css">
     <link rel="icon" type="image/png" href="../../img/sslogo.jpg"> <!-- Adjusted path -->
@@ -187,7 +134,25 @@ pg_close($conn);
             margin-left: 240px;
             padding: 20px;
         }
-        .table-container {
+        .dashboard-card {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .dashboard-card h4 {
+            font-size: 1.2rem;
+            color: #6c757d;
+        }
+        .dashboard-card p {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-top: 10px;
+            color: #343a40;
+        }
+        .recent-table-container {
             background-color: #fff;
             padding: 20px;
             border-radius: 5px;
@@ -198,20 +163,63 @@ pg_close($conn);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
         }
-        .movie-image {
-            width: 50px;
-            height: 70px;
+        .admin-user-info {
+            display: flex;
+            align-items: center;
+        }
+        .admin-user-info img {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .admin-user-info span {
+            font-weight: bold;
+        }
+        .btn-signout {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-signout:hover {
+            background-color: #c82333;
+        }
+        .movie-image-mini {
+            width: 40px;
+            height: 60px;
             object-fit: cover;
             border-radius: 3px;
         }
-        .pagination {
-            justify-content: center;
-            margin-top: 20px;
-        }
-        .search-box {
-            margin-bottom: 20px;
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: static;
+                height: auto;
+                padding: 0;
+            }
+            .sidebar-sticky {
+                height: auto;
+            }
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+            .admin-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .admin-user-info {
+                margin-top: 15px;
+            }
+            .table-responsive {
+                overflow-x: auto;
+            }
         }
     </style>
 </head>
@@ -220,7 +228,7 @@ pg_close($conn);
         <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="dashboard.php">Showtime Select Admin</a>
         <ul class="navbar-nav px-3">
             <li class="nav-item text-nowrap">
-                <a class="nav-link" href="../admin/logout.php">Sign out</a>
+                <a class="btn btn-signout" href="../admin/logout.php">Sign out</a> <!-- Adjusted path -->
             </li>
         </ul>
     </nav>
@@ -234,13 +242,13 @@ pg_close($conn);
                             <span>Content Management</span>
                         </h6>
                         <li class="nav-item">
-                            <a class="nav-link" href="dashboard.php">
+                            <a class="nav-link active" href="movies.php"> <!-- Changed from dashboard.php to movies.php -->
                                 <i class="fas fa-tachometer-alt"></i>
                                 Dashboard
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link active" href="movies.php">
+                            <a class="nav-link" href="movies.php">
                                 <i class="fas fa-film"></i>
                                 Movies
                             </a>
@@ -268,7 +276,7 @@ pg_close($conn);
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="../admin/reports.php">
+                            <a class="nav-link" href="../admin/reports.php"> <!-- Super Admin's comprehensive reports -->
                                 <i class="fas fa-chart-bar"></i>
                                 All Reports
                             </a>
@@ -313,130 +321,80 @@ pg_close($conn);
 
             <main role="main" class="main-content">
                 <div class="admin-header">
-                    <h1>Manage Movies</h1>
-                    <a href="add_movie.php" class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Add New Movie
-                    </a>
+                    <h1>Content Manager Dashboard</h1>
+                    <div class="admin-user-info">
+                        <img src="https://placehold.co/40x40/cccccc/333333?text=Admin" alt="Admin">
+                        <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name'] ?? 'Admin'); ?></span>
+                    </div>
                 </div>
 
-                <?php if (isset($successMessage)): ?>
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        <?php echo $successMessage; ?>
-                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-                            <span aria-hidden="true">&times;</span>
-                        </button>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="dashboard-card">
+                            <h4>Total Movies</h4>
+                            <p><?php echo $movieCount; ?></p>
+                        </div>
                     </div>
-                <?php endif; ?>
-
-                <?php if (isset($errorMessage)): ?>
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        <?php echo $errorMessage; ?>
-                        <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-                            <span aria-hidden="true">&times;</span>
-                        </button>
+                    <div class="col-md-4">
+                        <div class="dashboard-card">
+                            <h4>Active Schedules</h4>
+                            <p><?php echo $activeMovieCount; ?></p>
+                        </div>
                     </div>
-                <?php endif; ?>
-
-                <div class="table-container">
-                    <div class="search-box">
-                        <form action="" method="GET" class="form-inline">
-                            <div class="input-group w-100">
-                                <input type="text" name="search" class="form-control" placeholder="Search by title, genre, or director" value="<?php echo htmlspecialchars($search); ?>">
-                                <div class="input-group-append">
-                                    <button class="btn btn-outline-secondary" type="submit">
-                                        <i class="fas fa-search"></i>
-                                    </button>
-                                    <?php if (!empty($search)): ?>
-                                        <a href="movies.php" class="btn btn-outline-danger">
-                                            <i class="fas fa-times"></i>
-                                        </a>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </form>
+                    <div class="col-md-4">
+                        <div class="dashboard-card">
+                            <h4>Recent Additions</h4>
+                            <p><?php echo $recentMoviesCount; ?></p> <!-- Dynamic count of recent movies -->
+                        </div>
                     </div>
+                </div>
 
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead class="thead-dark">
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Image</th>
-                                    <th>Title</th>
-                                    <th>Genre</th>
-                                    <th>Duration</th>
-                                    <th>Release Date</th>
-                                    <th>Location</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (pg_num_rows($movies) > 0): ?>
-                                    <?php while ($movie = pg_fetch_assoc($movies)): 
-                                        // Ensure fetched keys are lowercase for consistency
-                                        $movie = array_change_key_case($movie, CASE_LOWER);
-                                    ?>
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="recent-table-container">
+                            <h3 class="mb-3">Recent Movies (Managed by You)</h3>
+                            <div class="table-responsive">
+                                <table class="table table-striped table-sm">
+                                    <thead>
                                         <tr>
-                                            <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
-                                            <td>
-                                                <img src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/50x70/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image">
-                                            </td>
-                                            <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
-                                            <td><?php echo htmlspecialchars($movie['moviereldate']); ?></td>
-                                            <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
-                                            <td>
-                                                <a href="edit_movie.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-warning">
-                                                    <i class="fas fa-edit"></i>
-                                                </a>
-                                                <a href="movies.php?delete=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this movie? This will also delete associated schedules!')">
-                                                    <i class="fas fa-trash"></i>
-                                                </a>
-                                                <a href="../user/movie_details.php?id=<?php echo htmlspecialchars($movie['movieid']); ?>" class="btn btn-sm btn-info" target="_blank">
-                                                    <i class="fas fa-eye"></i>
-                                                </a>
-                                            </td>
+                                            <th>ID</th>
+                                            <th>Image</th>
+                                            <th>Title</th>
+                                            <th>Genre</th>
+                                            <th>Duration</th>
+                                            <th>Release Date</th>
+                                            <th>Location</th>
                                         </tr>
-                                    <?php endwhile; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="8" class="text-center">No movies found</td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (pg_num_rows($recentMovies) > 0): ?>
+                                            <?php while ($movie = pg_fetch_assoc($recentMovies)): 
+                                                // Ensure fetched keys are lowercase for consistency
+                                                $movie = array_change_key_case($movie, CASE_LOWER);
+                                            ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($movie['movieid']); ?></td>
+                                                    <td>
+                                                        <img src="../../<?php echo htmlspecialchars($movie['movieimg']); ?>" onerror="this.onerror=null;this.src='https://placehold.co/40x60/cccccc/333333?text=No+Img';" alt="<?php echo htmlspecialchars($movie['movietitle']); ?>" class="movie-image-mini">
+                                                    </td>
+                                                    <td><?php echo htmlspecialchars($movie['movietitle']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['moviegenre']); ?></td>
+                                                    <td><?php echo htmlspecialchars($movie['movieduration']); ?> min</td>
+                                                    <td><?php echo htmlspecialchars($movie['moviereldate'] ?? 'N/A'); ?></td> <!-- Added N/A check here -->
+                                                    <td><?php echo htmlspecialchars($movie['locationname'] ?? 'N/A'); ?></td>
+                                                </tr>
+                                            <?php endwhile; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="7" class="text-center">No recent movies found</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <a href="movies.php" class="btn btn-primary btn-sm">View All Movies</a>
+                        </div>
                     </div>
-
-                    <?php if ($totalPages > 1): ?>
-                        <nav aria-label="Page navigation">
-                            <ul class="pagination">
-                                <?php if ($page > 1): ?>
-                                    <li class="page-item">
-                                        <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Previous">
-                                            <span aria-hidden="true">&laquo;</span>
-                                        </a>
-                                    </li>
-                                <?php endif; ?>
-
-                                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                                        <a class="page-link" href="?page=<?php echo $i; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>">
-                                            <?php echo $i; ?>
-                                        </a>
-                                    </li>
-                                <?php endfor; ?>
-
-                                <?php if ($page < $totalPages): ?>
-                                    <li class="page-item">
-                                        <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo !empty($search) ? '&search=' . urlencode($search) : ''; ?>" aria-label="Next">
-                                            <span aria-hidden="true">&raquo;</span>
-                                        </a>
-                                    </li>
-                                <?php endif; ?>
-                            </ul>
-                        </nav>
-                    <?php endif; ?>
                 </div>
             </main>
         </div>

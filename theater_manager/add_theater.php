@@ -78,8 +78,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($uploadOk !== 0) {
         // Insert theater data using prepared statement
         // Use RETURNING theaterid to get the newly inserted ID
-        // Corrected column name from theaterpanoraimg to theaterpanoramimg based on likely typo
-        $insertTheaterQuery = "INSERT INTO theaters (theatername, theateraddress, theatercity, theaterstate, theaterzipcode, theaterphone, theateremail, theaterstatus, theaterpanoramimg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING theaterid";
+        // Corrected column name from theaterpanoraimg to theaterpanoramaimg based on likely typo
+        $insertTheaterQuery = "INSERT INTO theaters (theatername, theateraddress, theatercity, theaterstate, theaterzipcode, theaterphone, theateremail, theaterstatus, theaterpanoramaimg) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING theaterid";
         $insertTheaterResult = pg_query_params($conn, $insertTheaterQuery, array($theaterName, $theaterAddress, $theaterCity, $theaterState, $theaterZipcode, $theaterPhone, $theaterEmail, $theaterStatus, $theaterPanoramaImg));
         
         if ($insertTheaterResult) {

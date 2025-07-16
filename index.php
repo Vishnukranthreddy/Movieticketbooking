@@ -339,13 +339,13 @@ pg_close($conn);
             <div class="movies-grid grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
                 <?php while ($theater = pg_fetch_assoc($theaters)): ?>
                     <div class="theater-card">
-                        <img src="<?php echo htmlspecialchars($theater['theaterpanoramimg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theatername']); ?>" class="theater-card-image">
+                        <img src="<?php echo htmlspecialchars($theater['theaterpanoramaimg'] ?? 'img/placeholders/default_theater_panorama.jpg'); ?>" onerror="this.onerror=null;this.src='https://placehold.co/400x200/0f3460/e0e0e0?text=No+Panorama';" alt="<?php echo htmlspecialchars($theater['theatername']); ?>" class="theater-card-image">
                         <div class="p-6">
                             <h3 class="text-xl font-semibold text-white mb-2"><?php echo htmlspecialchars($theater['theatername']); ?></h3>
                             <p class="text-sm text-gray-400 mb-4"><strong>City:</strong> <?php echo htmlspecialchars($theater['theatercity'] ?? 'N/A'); ?></p>
                         </div>
                         <div class="card-buttons">
-                            <?php if (!empty($theater['theaterpanoramimg'])): ?>
+                            <?php if (!empty($theater['theaterpanoramaimg'])): ?>
                                 <a href="user/view_theater.php?theater_id=<?php echo htmlspecialchars($theater['theaterid']); ?>" class="btn-primary">View Theater</a>
                             <?php else: ?>
                                 <span class="btn-secondary-custom opacity-50 cursor-not-allowed">No Panorama</span>

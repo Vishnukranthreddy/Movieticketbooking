@@ -1,21 +1,15 @@
 <?php
 session_start();
 
-// Database connection details for PostgreSQL
-$host = "dpg-d1gk4s7gi27c73brav8g-a.oregon-postgres.render.com";
-$username = "showtime_select_user";
-$password = "kbJAnSvfJHodYK7oDCaqaR7OvwlnJQi1";
-$database = "showtime_select";
-$port = "5432";
+// Database connection
+$host = "localhost";
+$username = "root";
+$password = "";
+$database = "movie_db";
+$conn = new mysqli($host, $username, $password, $database);
 
-// Construct the connection string
-$conn_string = "host={$host} port={$port} dbname={$dbname} user={$username} password={$password}";
-
-// Establish PostgreSQL connection
-$conn = pg_connect($conn_string);
-
-if (!$conn) {
-    die("Connection failed: " . pg_last_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 
 // Get featured movies for display (limit to 6 for homepage)
